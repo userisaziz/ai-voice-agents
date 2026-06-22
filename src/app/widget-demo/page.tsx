@@ -22,7 +22,7 @@ function WidgetDemoContent() {
         <h1 className="text-2xl font-bold text-surface-900 mb-2">Widget Demo</h1>
         <p className="text-surface-500 text-sm">The voice widget appears in the bottom right corner</p>
       </div>
-      <VoiceWidget businessId={businessId} businessName="Auto Repair" />
+      <VoiceWidget businessId={businessId} businessName="Marsa Tijarah" />
     </div>
   );
 }

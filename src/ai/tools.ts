@@ -2,9 +2,14 @@ import type { Business, Service, BusinessHours } from '@/types';
 import { formatPrice } from '@/lib/utils';
 import { DAYS_OF_WEEK } from '@/constants';
 
-export const REALTIME_TOOLS = [
+/**
+ * Deepgram Voice Agent function definitions.
+ * Format: { name, description, parameters, endpoint? }
+ * Client-side functions have no endpoint — the SDK triggers FunctionCallRequest events.
+ * Server-side functions include an endpoint URL.
+ */
+export const DEEPGRAM_FUNCTIONS = [
   {
-    type: 'function' as const,
     name: 'getBusinessHours',
     description: 'Get the business operating hours for each day of the week',
     parameters: {
@@ -14,7 +19,6 @@ export const REALTIME_TOOLS = [
     },
   },
   {
-    type: 'function' as const,
     name: 'getServices',
     description: 'Get all available auto repair services with pricing and duration',
     parameters: {
@@ -24,7 +28,6 @@ export const REALTIME_TOOLS = [
     },
   },
   {
-    type: 'function' as const,
     name: 'getAvailableSlots',
     description: 'Get available appointment time slots for a specific date',
     parameters: {
@@ -43,111 +46,65 @@ export const REALTIME_TOOLS = [
     },
   },
   {
-    type: 'function' as const,
     name: 'createAppointment',
     description: 'Book an appointment for a customer',
     parameters: {
       type: 'object',
       properties: {
-        customer_name: {
-          type: 'string',
-          description: 'Full name of the customer',
-        },
-        customer_phone: {
-          type: 'string',
-          description: 'Customer phone number',
-        },
-        customer_email: {
-          type: 'string',
-          description: 'Customer email address (optional)',
-        },
-        vehicle_year: {
-          type: 'string',
-          description: 'Year of the vehicle',
-        },
-        vehicle_make: {
-          type: 'string',
-          description: 'Make/brand of the vehicle (e.g., Toyota, Ford)',
-        },
-        vehicle_model: {
-          type: 'string',
-          description: 'Model of the vehicle (e.g., Camry, F-150)',
-        },
-        service_id: {
-          type: 'string',
-          description: 'ID of the service being booked',
-        },
-        scheduled_at: {
-          type: 'string',
-          description: 'ISO 8601 datetime for the appointment (e.g., 2024-01-15T10:00:00)',
-        },
-        notes: {
-          type: 'string',
-          description: 'Any additional notes from the customer',
-        },
+        customer_name: { type: 'string', description: 'Full name of the customer' },
+        customer_phone: { type: 'string', description: 'Customer phone number' },
+        customer_email: { type: 'string', description: 'Customer email address (optional)' },
+        vehicle_year: { type: 'string', description: 'Year of the vehicle' },
+        vehicle_make: { type: 'string', description: 'Make/brand of the vehicle (e.g., Toyota, Ford)' },
+        vehicle_model: { type: 'string', description: 'Model of the vehicle (e.g., Camry, F-150)' },
+        service_id: { type: 'string', description: 'ID of the service being booked' },
+        scheduled_at: { type: 'string', description: 'ISO 8601 datetime for the appointment (e.g., 2024-01-15T10:00:00)' },
+        notes: { type: 'string', description: 'Any additional notes from the customer' },
       },
       required: ['customer_name', 'customer_phone', 'scheduled_at'],
     },
   },
   {
-    type: 'function' as const,
     name: 'createLead',
     description: 'Capture a customer lead when they are interested but not ready to book',
     parameters: {
       type: 'object',
       properties: {
-        name: {
-          type: 'string',
-          description: 'Customer name',
-        },
-        phone: {
-          type: 'string',
-          description: 'Customer phone number',
-        },
-        email: {
-          type: 'string',
-          description: 'Customer email (optional)',
-        },
+        name: { type: 'string', description: 'Customer name' },
+        phone: { type: 'string', description: 'Customer phone number' },
+        email: { type: 'string', description: 'Customer email (optional)' },
         vehicle_year: { type: 'string' },
         vehicle_make: { type: 'string' },
         vehicle_model: { type: 'string' },
-        service_interest: {
-          type: 'string',
-          description: 'What service they are interested in',
-        },
+        service_interest: { type: 'string', description: 'What service they are interested in' },
         notes: { type: 'string' },
       },
       required: ['name', 'phone'],
     },
   },
   {
-    type: 'function' as const,
     name: 'requestCallback',
     description: 'Schedule a callback for a customer who wants to be called back',
     parameters: {
       type: 'object',
       properties: {
-        name: {
-          type: 'string',
-          description: 'Customer name',
-        },
-        phone: {
-          type: 'string',
-          description: 'Callback phone number',
-        },
-        preferred_time: {
-          type: 'string',
-          description: 'Preferred callback time',
-        },
-        reason: {
-          type: 'string',
-          description: 'Reason for the callback',
-        },
+        name: { type: 'string', description: 'Customer name' },
+        phone: { type: 'string', description: 'Callback phone number' },
+        preferred_time: { type: 'string', description: 'Preferred callback time' },
+        reason: { type: 'string', description: 'Reason for the callback' },
       },
       required: ['name', 'phone'],
     },
   },
 ];
+
+/**
+ * OpenAI Realtime tool format (kept for backwards compatibility / future use).
+ */
+export const REALTIME_TOOLS = DEEPGRAM_FUNCTIONS.map((fn) => ({
+  type: 'function' as const,
+  ...fn,
+}));
 
 export function buildSystemPrompt(
   business: Business,

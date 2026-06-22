@@ -20,7 +20,7 @@ interface VoiceWidgetProps {
 
 export function VoiceWidget({
   businessId,
-  businessName = 'Auto Repair',
+  businessName = 'Marsa Tijarah',
   primaryColor = '#22c55e',
   position = 'bottom-right',
   greeting,
@@ -134,7 +134,7 @@ export function VoiceWidget({
             <div className="px-4 py-2.5 flex items-center justify-center gap-1.5"
               style={{ borderTop: '1px solid rgba(255,255,255,0.05)', background: 'rgba(0,0,0,0.3)' }}>
               <Sparkles className="w-3 h-3" style={{ color: '#3d5060' }} />
-              <span className="text-[10px]" style={{ color: '#2a3f4d' }}>Powered by CarBot AI</span>
+              <span className="text-[10px]" style={{ color: '#2a3f4d' }}>Powered by Marsa Tijarah</span>
             </div>
           </motion.div>
         ) : (

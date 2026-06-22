@@ -3,11 +3,31 @@
 import { useRef, useCallback, useEffect } from 'react';
 import { useVoiceStore } from '@/store/voice';
 import type { TranscriptEntry } from '@/types';
+import { DEEPGRAM_FUNCTIONS } from '@/ai/tools';
 
 interface UseRealtimeVoiceOptions {
   businessId: string;
   onConversationEnd?: (conversationId: string) => void;
 }
+
+type DeepgramSettings = {
+  type: 'Settings';
+  audio: {
+    input: { encoding: string; sample_rate: number };
+    output: { encoding: string; sample_rate: number; container: string };
+  };
+  agent: {
+    listen: { provider: { type: string; model: string } };
+    think: {
+      provider: { type: string; model: string };
+      prompt: string;
+      functions: typeof DEEPGRAM_FUNCTIONS;
+      endpoint?: { url: string; headers: Record<string, string> };
+    };
+    speak: { provider: { type: string; model: string } };
+    greeting?: string;
+  };
+};
 
 export function useRealtimeVoice({ businessId, onConversationEnd }: UseRealtimeVoiceOptions) {
   const {
@@ -22,13 +42,52 @@ export function useRealtimeVoice({ businessId, onConversationEnd }: UseRealtimeV
     conversationId,
   } = useVoiceStore();
 
-  const pcRef = useRef<RTCPeerConnection | null>(null);
-  const dcRef = useRef<RTCDataChannel | null>(null);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const localStreamRef = useRef<MediaStream | null>(null);
+  const wsRef = useRef<WebSocket | null>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const processorRef = useRef<ScriptProcessorNode | null>(null);
   const startTimeRef = useRef<number | null>(null);
-  const assistantMessageIdRef = useRef<string | null>(null);
+  const assistantMsgIdRef = useRef<string | null>(null);
   const pendingSavesRef = useRef<Promise<unknown>[]>([]);
+  const audioChunksRef = useRef<Uint8Array[]>([]);
+  const audioQueueRef = useRef<Uint8Array[]>([]);
+  const isPlayingRef = useRef(false);
+  const audioElementRef = useRef<HTMLAudioElement | null>(null);
+
+  const playAudioChunk = useCallback((chunk: Uint8Array) => {
+    audioQueueRef.current.push(chunk);
+    if (!isPlayingRef.current) {
+      playNextChunk();
+    }
+  }, []);
+
+  const playNextChunk = useCallback(() => {
+    if (audioQueueRef.current.length === 0) {
+      isPlayingRef.current = false;
+      return;
+    }
+    isPlayingRef.current = true;
+    const chunk = audioQueueRef.current.shift()!;
+    const blob = new Blob([chunk.buffer as ArrayBuffer], { type: 'audio/wav' });
+    const url = URL.createObjectURL(blob);
+
+    if (!audioElementRef.current) {
+      audioElementRef.current = new Audio();
+    }
+    const audio = audioElementRef.current;
+    audio.src = url;
+    audio.onended = () => {
+      URL.revokeObjectURL(url);
+      playNextChunk();
+    };
+    audio.onerror = () => {
+      URL.revokeObjectURL(url);
+      isPlayingRef.current = false;
+    };
+    audio.play().catch(() => {
+      isPlayingRef.current = false;
+    });
+  }, []);
 
   const connect = useCallback(async () => {
     if (connectionState.status !== 'idle' && connectionState.status !== 'error') return;
@@ -37,7 +96,7 @@ export function useRealtimeVoice({ businessId, onConversationEnd }: UseRealtimeV
     clearTranscript();
 
     try {
-      /* Phase 1: fetch session config from our backend */
+      // Phase 1: Get session config from backend (system prompt, tools, conversation ID)
       const res = await fetch('/api/realtime/session', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -47,212 +106,264 @@ export function useRealtimeVoice({ businessId, onConversationEnd }: UseRealtimeV
       if (!res.ok) throw new Error('Failed to create session');
 
       const sessionData = await res.json();
-      const { conversationId: convId } = sessionData;
-      const model = sessionData.model || 'gpt-4o-realtime';
+      const { conversationId: convId, greeting, systemPrompt, agentName } = sessionData;
 
       setConversationId(convId);
       startTimeRef.current = Date.now();
 
-      const pc = new RTCPeerConnection();
-      pcRef.current = pc;
+      // Phase 2: Get Deepgram auth token (short-lived, browser-safe)
+      const tokenRes = await fetch('/api/deepgram-token');
+      if (!tokenRes.ok) throw new Error('Failed to get Deepgram token');
+      const token = await tokenRes.text();
 
-      const audioEl = document.createElement('audio');
-      audioEl.autoplay = true;
-      audioRef.current = audioEl;
+      // Phase 3: Open WebSocket to Deepgram Voice Agent
+      const wsUrl = `wss://api.deepgram.com/v1/agent/converse`;
+      const ws = new WebSocket(wsUrl, ['token', token]);
+      wsRef.current = ws;
 
-      pc.ontrack = (e) => {
-        audioEl.srcObject = e.streams[0];
-      };
+      ws.onopen = () => {
+        // Send Settings message to configure the agent
+        const sttModel = process.env.NEXT_PUBLIC_DEEPGRAM_STT_MODEL || 'nova-3';
+        const ttsModel = process.env.NEXT_PUBLIC_DEEPGRAM_TTS_MODEL || 'aura-2-thalia-en';
+        // Use server-provided LLM config (includes endpoint URL for custom providers)
+        const llmProviderType = sessionData.llmProviderType
+          || process.env.NEXT_PUBLIC_DEEPGRAM_LLM_PROVIDER_TYPE
+          || 'open_ai';
+        const llmModel = process.env.NEXT_PUBLIC_DEEPGRAM_LLM_MODEL || 'gpt-4o-mini';
 
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      localStreamRef.current = stream;
-      stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+        // Build think config — supports open_ai, deepseek, or custom endpoint
+        const thinkConfig: DeepgramSettings['agent']['think'] = {
+          provider: { type: llmProviderType, model: llmModel },
+          prompt: systemPrompt,
+          functions: DEEPGRAM_FUNCTIONS,
+        };
 
-      const dc = pc.createDataChannel('oai-events');
-      dcRef.current = dc;
+        // For custom/self-hosted LLMs, Deepgram calls your endpoint server-to-server
+        if (llmProviderType === 'custom' && sessionData.llmEndpoint) {
+          thinkConfig.endpoint = {
+            url: sessionData.llmEndpoint,
+            headers: { 'Content-Type': 'application/json' },
+          };
+        }
 
-      dc.onopen = () => {
+        const settings: DeepgramSettings = {
+          type: 'Settings',
+          audio: {
+            input: { encoding: 'linear16', sample_rate: 16000 },
+            output: { encoding: 'linear16', sample_rate: 16000, container: 'wav' },
+          },
+          agent: {
+            listen: {
+              provider: { type: 'deepgram', model: sttModel },
+            },
+            think: thinkConfig,
+            speak: {
+              provider: { type: 'deepgram', model: ttsModel },
+            },
+            greeting: greeting || `Hello! How can I help you today?`,
+          },
+        };
+
+        ws.send(JSON.stringify(settings));
         setConnectionState({ status: 'listening' });
-        /* Trigger the greeting */
-        dc.send(JSON.stringify({ type: 'response.create' }));
       };
 
-      dc.onmessage = async (e) => {
+      ws.onmessage = async (event) => {
+        // Binary messages are audio chunks from the agent
+        if (event.data instanceof Blob) {
+          const arrayBuffer = await event.data.arrayBuffer();
+          playAudioChunk(new Uint8Array(arrayBuffer));
+          return;
+        }
+
+        // JSON messages are events
+        let data: Record<string, unknown>;
         try {
-          const event = JSON.parse(e.data);
-await handleRealtimeEvent(event, convId, businessId);
-        } catch (err) {
-          console.error('Event parse error:', err);
+          data = JSON.parse(event.data);
+        } catch {
+          return;
+        }
+
+        const type = data.type as string;
+
+        // ── Agent started speaking ─────────────────────────────────────────
+        if (type === 'AgentStartedSpeaking') {
+          setConnectionState({ status: 'speaking' });
+        }
+
+        // ── User started speaking (for interruption) ─────────────────────
+        if (type === 'UserStartedSpeaking') {
+          setConnectionState({ status: 'listening' });
+          // Stop audio playback on interruption
+          if (audioElementRef.current) {
+            audioElementRef.current.pause();
+            audioElementRef.current.currentTime = 0;
+          }
+          audioQueueRef.current = [];
+          isPlayingRef.current = false;
+        }
+
+        // ── Conversation transcript ───────────────────────────────────────
+        if (type === 'ConversationText') {
+          const role = data.role as string;
+          const content = data.content as string;
+
+          if (!content?.trim()) return;
+
+          if (role === 'user') {
+            addTranscriptEntry({
+              id: `user-${Date.now()}`,
+              role: 'user',
+              content,
+              timestamp: Date.now(),
+            });
+            if (convId) {
+              const p = fetch('/api/conversations', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ conversationId: convId, role: 'user', content }),
+              }).catch(console.error);
+              pendingSavesRef.current.push(p);
+            }
+          }
+
+          if (role === 'assistant') {
+            addTranscriptEntry({
+              id: `assistant-${Date.now()}`,
+              role: 'assistant',
+              content,
+              timestamp: Date.now(),
+            });
+            if (convId) {
+              const p = fetch('/api/conversations', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ conversationId: convId, role: 'assistant', content }),
+              }).catch(console.error);
+              pendingSavesRef.current.push(p);
+            }
+          }
+        }
+
+        // ── Function call request (client-side execution) ──────────────────
+        if (type === 'FunctionCallRequest') {
+          const functionName = data.function_name as string;
+          const toolArgs = (data.input as Record<string, unknown>) || {};
+          const functionCallId = data.function_call_id as string;
+
+          try {
+            const toolRes = await fetch('/api/realtime/tools', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                toolName: functionName,
+                toolArgs,
+                businessId,
+                conversationId: convId,
+              }),
+            });
+            const { result } = await toolRes.json();
+
+            // Send result back to Deepgram
+            ws.send(JSON.stringify({
+              type: 'FunctionCallResponse',
+              function_call_id: functionCallId,
+              output: JSON.stringify(result),
+            }));
+          } catch (err) {
+            console.error('Function call failed:', err);
+            ws.send(JSON.stringify({
+              type: 'FunctionCallResponse',
+              function_call_id: functionCallId,
+              output: JSON.stringify({ error: 'Function call failed' }),
+            }));
+          }
+        }
+
+        // ── Agent audio done ──────────────────────────────────────────────
+        if (type === 'AgentAudioDone') {
+          setConnectionState({ status: 'listening' });
+        }
+
+        // ── Welcome (connection established) ──────────────────────────────
+        if (type === 'Welcome') {
+          console.log('[Deepgram] Connected to Voice Agent');
+        }
+
+        // ── Errors ─────────────────────────────────────────────────────────
+        if (type === 'Error') {
+          const msg = (data.description as string) || 'Unknown error';
+          console.error('[Deepgram] Error:', msg);
+          setConnectionState({ status: 'error', error: msg });
         }
       };
 
-      dc.onerror = (err) => {
-        console.error('DataChannel error:', err);
+      ws.onerror = (err) => {
+        console.error('[Deepgram] WebSocket error:', err);
         setConnectionState({ status: 'error', error: 'Connection error' });
       };
 
-      pc.oniceconnectionstatechange = () => {
-        if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed') {
-          setConnectionState({ status: 'idle' });
-        }
+      ws.onclose = () => {
+        setConnectionState({ status: 'idle' });
       };
 
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
+      // Phase 4: Capture microphone audio and stream to Deepgram
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          channelCount: 1,
+          sampleRate: 16000,
+          echoCancellation: true,
+          noiseSuppression: true,
+        },
+      });
+      mediaStreamRef.current = stream;
 
-      /* Wait for ICE gathering to complete before sending SDP */
-      const completeSdp = await new Promise<string>((resolve) => {
-        if (pc.iceGatheringState === 'complete') {
-          resolve(pc.localDescription!.sdp);
-        } else {
-          pc.addEventListener('icegatheringstatechange', () => {
-            if (pc.iceGatheringState === 'complete') {
-              resolve(pc.localDescription!.sdp);
-            }
-          });
+      const audioContext = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)({
+        sampleRate: 16000,
+      });
+      audioContextRef.current = audioContext;
+
+      const source = audioContext.createMediaStreamSource(stream);
+      // ScriptProcessor is deprecated but widely supported; AudioWorklet is the modern replacement
+      const processor = audioContext.createScriptProcessor(4096, 1, 1);
+      processorRef.current = processor;
+
+      processor.onaudioprocess = (e) => {
+        if (ws.readyState !== WebSocket.OPEN) return;
+        const inputData = e.inputBuffer.getChannelData(0);
+        // Convert float32 samples to Int16 PCM
+        const pcm = new Int16Array(inputData.length);
+        for (let i = 0; i < inputData.length; i++) {
+          const s = Math.max(-1, Math.min(1, inputData[i]));
+          pcm[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
         }
-      });
+        ws.send(pcm.buffer);
+      };
 
-      /* Phase 2: proxy SDP + session config through our backend */
-      const sdpRes = await fetch('/api/realtime/connect', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          sdp: completeSdp,
-          model,
-          voice: sessionData.voice,
-          instructions: sessionData.systemPrompt,
-          tools: sessionData.tools,
-          turnDetection: sessionData.turnDetection,
-        }),
-      });
-
-      if (!sdpRes.ok) throw new Error('SDP exchange failed');
-
-      const answerSdp = await sdpRes.text();
-      await pc.setRemoteDescription({ type: 'answer', sdp: answerSdp });
+      source.connect(processor);
+      processor.connect(audioContext.destination);
 
     } catch (err) {
       console.error('Voice connection error:', err);
-      setConnectionState({ status: 'error', error: 'Failed to connect. Check microphone permissions.' });
+      setConnectionState({
+        status: 'error',
+        error: 'Failed to connect. Check microphone permissions.',
+      });
       cleanup();
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [businessId, connectionState.status]);
 
-  const handleRealtimeEvent = async (event: Record<string, unknown>, convId: string, bId: string) => {
-    const type = event.type as string;
-
-    // ── Speaking state ───────────────────────────────────────────────────────
-    if (type === 'input_audio_buffer.speech_started') {
-      setConnectionState({ status: 'listening' });
-    }
-
-    if (type === 'response.created') {
-      setConnectionState({ status: 'speaking' });
-    }
-
-    // ── User spoke — GA doesn't transcribe user audio, show placeholder ───────
-    if (type === 'input_audio_buffer.committed') {
-      addTranscriptEntry({ id: `user-${Date.now()}`, role: 'user', content: '🎤 Voice message', timestamp: Date.now() });
-    }
-
-    // ── Assistant transcript (GA: response.output_audio_transcript.*) ─────────
-    if (type === 'response.output_audio_transcript.delta') {
-      const delta = (event.delta as string) || '';
-      if (delta) {
-        if (assistantMessageIdRef.current === null) {
-          const id = `assistant-${Date.now()}`;
-          assistantMessageIdRef.current = id;
-          addTranscriptEntry({ id, role: 'assistant', content: delta, timestamp: Date.now() });
-        } else {
-          updateLastEntry((useVoiceStore.getState().transcript.at(-1)?.content || '') + delta);
-        }
-        setConnectionState({ status: 'speaking' });
-      }
-    }
-
-    if (type === 'response.output_audio_transcript.done') {
-      const transcript = (event.transcript as string) || '';
-      if (transcript) {
-        // replace streamed partial with the authoritative final text
-        if (assistantMessageIdRef.current !== null) {
-          updateLastEntry(transcript);
-        } else {
-          addTranscriptEntry({ id: `assistant-${Date.now()}`, role: 'assistant', content: transcript, timestamp: Date.now() });
-        }
-        if (convId) {
-          const p = fetch('/api/conversations', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ conversationId: convId, role: 'assistant', content: transcript }),
-          }).catch(console.error);
-          pendingSavesRef.current.push(p);
-        }
-      }
-      assistantMessageIdRef.current = null;
-      setConnectionState({ status: 'listening' });
-    }
-
-    // ── User transcript (whisper transcription enabled via session.update) ─────
-    if (type === 'conversation.item.input_audio_transcription.completed') {
-      const transcript = (event.transcript as string) || '';
-      if (transcript.trim()) {
-        addTranscriptEntry({ id: `user-${Date.now()}`, role: 'user', content: transcript, timestamp: Date.now() });
-        if (convId) {
-          const p = fetch('/api/conversations', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ conversationId: convId, role: 'user', content: transcript }),
-          }).catch(console.error);
-          pendingSavesRef.current.push(p);
-        }
-      }
-    }
-
-    if (type === 'response.function_call_arguments.done') {
-      const toolName = (event.name as string) || '';
-      const toolArgs = JSON.parse((event.arguments as string) || '{}');
-
-      try {
-        const toolRes = await fetch('/api/realtime/tools', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ toolName, toolArgs, businessId: bId, conversationId: convId }),
-        });
-        const { result } = await toolRes.json();
-
-        if (dcRef.current?.readyState === 'open') {
-          dcRef.current.send(JSON.stringify({
-            type: 'conversation.item.create',
-            item: {
-              type: 'function_call_output',
-              call_id: event.call_id,
-              output: JSON.stringify(result),
-            },
-          }));
-          dcRef.current.send(JSON.stringify({ type: 'response.create' }));
-        }
-      } catch (err) {
-        console.error('Tool call failed:', err);
-      }
-    }
-
-    if (type === 'error') {
-      const error = event.error as { message?: string };
-      console.error('Realtime error:', error);
-    }
-  };
-
   const disconnect = useCallback(async () => {
     const convId = conversationId;
-    const duration = startTimeRef.current ? Math.round((Date.now() - startTimeRef.current) / 1000) : null;
+    const duration = startTimeRef.current
+      ? Math.round((Date.now() - startTimeRef.current) / 1000)
+      : null;
 
     cleanup();
     setConnectionState({ status: 'idle' });
 
     if (convId) {
-      // Wait for all in-flight message saves so sentiment derivation has data
       await Promise.all(pendingSavesRef.current).catch(() => {});
       pendingSavesRef.current = [];
 
@@ -271,21 +382,41 @@ await handleRealtimeEvent(event, convId, businessId);
   }, [conversationId, onConversationEnd]);
 
   const cleanup = () => {
-    localStreamRef.current?.getTracks().forEach((t) => t.stop());
-    localStreamRef.current = null;
-    dcRef.current?.close();
-    dcRef.current = null;
-    pcRef.current?.close();
-    pcRef.current = null;
-    if (audioRef.current) {
-      audioRef.current.srcObject = null;
+    // Stop microphone
+    mediaStreamRef.current?.getTracks().forEach((t) => t.stop());
+    mediaStreamRef.current = null;
+
+    // Stop audio processor
+    processorRef.current?.disconnect();
+    processorRef.current = null;
+
+    // Close audio context
+    if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+      audioContextRef.current.close().catch(() => {});
     }
+    audioContextRef.current = null;
+
+    // Close WebSocket
+    if (wsRef.current) {
+      if (wsRef.current.readyState === WebSocket.OPEN) {
+        wsRef.current.close();
+      }
+    }
+    wsRef.current = null;
+
+    // Stop any playing audio
+    if (audioElementRef.current) {
+      audioElementRef.current.pause();
+      audioElementRef.current.src = '';
+    }
+    audioQueueRef.current = [];
+    isPlayingRef.current = false;
     startTimeRef.current = null;
   };
 
   const toggleMute = useCallback(() => {
-    localStreamRef.current?.getAudioTracks().forEach((track) => {
-      track.enabled = isMuted;
+    mediaStreamRef.current?.getAudioTracks().forEach((track) => {
+      track.enabled = isMuted; // if currently muted, enable; if enabled, mute
     });
     setMuted(!isMuted);
   }, [isMuted, setMuted]);

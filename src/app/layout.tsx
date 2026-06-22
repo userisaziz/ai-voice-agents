@@ -6,11 +6,11 @@ const inter = Inter({ subsets: ['latin'] });
 
 export const metadata: Metadata = {
   title: {
-    default: 'CarBot AI - AI Voice Receptionist for Auto Repair',
-    template: '%s | CarBot AI',
+    default: 'Marsa Tijarah — Saudi Arabia\'s Premier B2B Marketplace',
+    template: '%s | Marsa Tijarah',
   },
-  description: 'AI-powered voice receptionist platform for auto repair businesses. Book appointments, answer questions, and capture leads 24/7.',
-  keywords: ['AI receptionist', 'auto repair', 'voice AI', 'appointment booking'],
+  description: 'AI-powered B2B marketplace connecting suppliers and buyers across Saudi Arabia. Explore industrial equipment, electronics, food products, and more.',
+  keywords: ['B2B marketplace', 'Saudi Arabia', 'suppliers', 'buyers', 'industrial equipment', 'wholesale', 'Marsa Tijarah'],
 };
 
 export default function RootLayout({

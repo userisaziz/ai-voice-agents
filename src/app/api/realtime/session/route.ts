@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminSupabase } from '@/lib/supabase/admin';
-import { buildSystemPrompt, REALTIME_TOOLS } from '@/ai/tools';
+import { buildSystemPrompt, DEEPGRAM_FUNCTIONS, REALTIME_TOOLS } from '@/ai/tools';
 import type { Business, Agent, Service, BusinessHours } from '@/types';
 
 const CORS = {
@@ -98,14 +98,25 @@ export async function POST(req: NextRequest) {
       }
 
       const sensitivity = agentTyped?.interrupt_sensitivity || 'medium';
+      const greeting = agentTyped?.greeting_message
+        || `Hello! Thank you for calling ${business.name}, how can I help you today?`;
+
+      // LLM endpoint config for custom/self-hosted providers
+      const llmProviderType = process.env.DEEPGRAM_LLM_PROVIDER_TYPE || 'open_ai';
+      const llmEndpointUrl = process.env.DEEPGRAM_LLM_ENDPOINT_URL || null;
 
       return NextResponse.json({
         conversationId: conversation?.id,
         agentName: agentTyped?.name || 'AI Receptionist',
         voice: agentTyped?.voice || 'alloy',
-        model: 'gpt-realtime',
+        model: 'deepgram-voice-agent',
         systemPrompt,
-        tools: REALTIME_TOOLS,
+        tools: REALTIME_TOOLS,       // OpenAI format (legacy)
+        functions: DEEPGRAM_FUNCTIONS, // Deepgram format
+        greeting,
+        // LLM config passed to client for Deepgram Settings message
+        llmProviderType,
+        llmEndpoint: llmEndpointUrl || null,
         turnDetection: {
           type: 'server_vad',
           threshold: sensitivity === 'low' ? 0.9 : sensitivity === 'high' ? 0.5 : 0.7,

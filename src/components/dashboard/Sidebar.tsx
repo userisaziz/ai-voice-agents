@@ -79,8 +79,8 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
               style={{ borderColor: '#080e10' }} />
           </div>
           <div className="flex flex-col leading-none">
-            <span className="text-[13px] font-bold tracking-tight text-white">CarBot <span className="text-green-400">AI</span></span>
-            <span className="text-[10px] text-green-500/70 font-medium mt-0.5">Voice Platform</span>
+            <span className="text-[13px] font-bold tracking-tight text-white">Marsa <span className="text-green-400">Tijarah</span></span>
+            <span className="text-[10px] text-green-500/70 font-medium mt-0.5">B2B Marketplace</span>
           </div>
         </div>
 

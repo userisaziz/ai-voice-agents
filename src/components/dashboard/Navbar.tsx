@@ -83,7 +83,7 @@ export function Navbar({ onMenuClick }: NavbarProps) {
           onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = 'rgba(255,255,255,0.08)'; }}>
           <div className="w-5 h-5 rounded-md flex items-center justify-center text-white text-[9px] font-bold"
             style={{ background: 'linear-gradient(135deg,#22c55e,#16a34a)' }}>
-            CA
+            MT
           </div>
           <ChevronDown className="w-3 h-3" style={{ color: '#3d5060' }} />
         </button>

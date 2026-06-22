@@ -1,6 +1,6 @@
 # AI Voice Agents SaaS
 
-AI-powered voice assistant platform for businesses built with Next.js, OpenAI, and Supabase.
+AI-powered voice assistant platform for businesses built with Next.js, Deepgram Voice Agent, and Supabase.
 
 ## Project Overview
 
@@ -33,7 +33,10 @@ This tutorial is perfect for developers, SaaS founders, freelancers, and anyone 
 - **Frontend**: Next.js 14, React, TypeScript
 - **Styling**: Tailwind CSS
 - **Database & Auth**: Supabase
-- **AI**: OpenAI Realtime API (GPT-4o)
+- **Voice AI**: Deepgram Voice Agent API (STT + LLM + TTS pipeline)
+  - **STT**: Deepgram Nova-3
+  - **LLM**: OpenAI GPT-4o-mini
+  - **TTS**: Deepgram Aura-2
 - **State Management**: Zustand
 - **Forms**: React Hook Form + Zod
 - **UI Components**: Custom components with Framer Motion
@@ -79,9 +82,40 @@ This tutorial is perfect for developers, SaaS founders, freelancers, and anyone 
    NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
    NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
    SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
-   OPENAI_API_KEY=your_openai_api_key
+   DEEPGRAM_API_KEY=your_deepgram_api_key
    NEXT_PUBLIC_APP_URL=http://localhost:3000
    NEXT_PUBLIC_ENABLE_VOICE=true
+   NEXT_PUBLIC_DEEPGRAM_STT_MODEL=nova-3
+   NEXT_PUBLIC_DEEPGRAM_TTS_MODEL=aura-2-thalia-en
+   ```
+
+   Get your Deepgram API key at [console.deepgram.com](https://console.deepgram.com).
+
+   ### LLM Configuration
+
+   The voice agent supports **any LLM provider** — OpenAI, DeepSeek, or self-hosted (Ollama, vLLM, LM Studio):
+
+   ```env
+   # Option 1: OpenAI (default)
+   DEEPGRAM_LLM_PROVIDER_TYPE=open_ai
+   DEEPGRAM_LLM_MODEL=gpt-4o-mini
+   OPENAI_API_KEY=sk-...
+   NEXT_PUBLIC_DEEPGRAM_LLM_PROVIDER_TYPE=open_ai
+   NEXT_PUBLIC_DEEPGRAM_LLM_MODEL=gpt-4o-mini
+
+   # Option 2: DeepSeek
+   DEEPGRAM_LLM_PROVIDER_TYPE=deepseek
+   DEEPGRAM_LLM_MODEL=deepseek-chat
+   DEEPSEEK_API_KEY=sk-...
+   NEXT_PUBLIC_DEEPGRAM_LLM_PROVIDER_TYPE=deepseek
+   NEXT_PUBLIC_DEEPGRAM_LLM_MODEL=deepseek-chat
+
+   # Option 3: Self-hosted (Ollama, vLLM, LM Studio, etc.)
+   DEEPGRAM_LLM_PROVIDER_TYPE=custom
+   DEEPGRAM_LLM_MODEL=llama3
+   DEEPGRAM_LLM_ENDPOINT_URL=http://localhost:11434/v1
+   NEXT_PUBLIC_DEEPGRAM_LLM_PROVIDER_TYPE=custom
+   NEXT_PUBLIC_DEEPGRAM_LLM_MODEL=llama3
    ```
 
 4. **Set up Supabase**
@@ -94,6 +128,22 @@ This tutorial is perfect for developers, SaaS founders, freelancers, and anyone 
    ```
 
    Open [http://localhost:3000](http://localhost:3000) in your browser.
+
+## 🎙️ Voice Agent Architecture
+
+The voice pipeline uses **Deepgram Voice Agent API** via WebSocket:
+
+```
+Browser → WebSocket → Deepgram Voice Agent API
+         (token from /api/deepgram-token)
+```
+
+- **STT**: Deepgram Nova-3 (real-time speech-to-text)
+- **LLM**: Configurable — OpenAI, DeepSeek, or any self-hosted OpenAI-compatible API
+- **TTS**: Deepgram Aura-2 (text-to-speech)
+- **Function Calling**: Client-side, executed via `/api/realtime/tools`
+
+Authentication uses short-lived tokens (never expose API keys to the browser).
 
 ## 📦 Available Scripts
 

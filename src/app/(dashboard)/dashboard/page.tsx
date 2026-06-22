@@ -205,7 +205,7 @@ export default function DashboardPage() {
                 <div className="flex-1 min-w-0">
                   <div className="text-[13px] font-medium truncate" style={{ color: '#e2e8f0' }}>{appt.customer_name}</div>
                   <div className="text-[11px] truncate" style={{ color: '#3d5060' }}>
-                    {appt.vehicle_year} {appt.vehicle_make} {appt.vehicle_model}
+                    {appt.notes || 'Meeting scheduled'}
                   </div>
                 </div>
                 <div className="text-right flex-shrink-0">
