@@ -293,7 +293,13 @@ export function useRealtimeVoice({ businessId, agentId, onConversationEnd }: Use
         // Start KeepAlive to prevent server-side timeout
         if (keepAliveRef.current) clearInterval(keepAliveRef.current);
         keepAliveRef.current = setInterval(() => {
-          connection.sendKeepAlive({ type: 'KeepAlive' });
+          if (socketOpenRef.current) {
+            try {
+              connection.sendKeepAlive({ type: 'KeepAlive' });
+            } catch {
+              socketOpenRef.current = false;
+            }
+          }
         }, 5000);
         break;
       }
@@ -304,8 +310,15 @@ export function useRealtimeVoice({ businessId, agentId, onConversationEnd }: Use
         // Flush any queued mic frames now that settings are confirmed
         const queued = audioQueueRef.current;
         audioQueueRef.current = [];
-        for (const buf of queued) {
-          connection.sendMedia(buf);
+        if (socketOpenRef.current) {
+          for (const buf of queued) {
+            try {
+              connection.sendMedia(buf);
+            } catch {
+              socketOpenRef.current = false;
+              break;
+            }
+          }
         }
         setConnectionState({ status: 'listening' });
         break;
@@ -459,8 +472,14 @@ export function useRealtimeVoice({ businessId, agentId, onConversationEnd }: Use
 
       await setupPlaybackWorklet(playbackContext);
       await setupMicWorklet(micContext, stream, (buffer) => {
+        if (!socketOpenRef.current) return; // Guard: socket closed
         if (settingsAppliedRef.current) {
-          connection.sendMedia(buffer);
+          try {
+            connection.sendMedia(buffer);
+          } catch {
+            // Socket may have closed between check and send — safe to ignore
+            socketOpenRef.current = false;
+          }
         } else {
           // Queue frames until SettingsApplied (prevents "binary before settings" error)
           audioQueueRef.current.push(buffer);

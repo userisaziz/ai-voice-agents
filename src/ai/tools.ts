@@ -28,6 +28,42 @@ export const DEEPGRAM_FUNCTIONS = [
     },
   },
   {
+    name: 'searchProducts',
+    description: 'Search for products in the Marsa Tijarah marketplace by keyword, category, or specifications. Returns approved products with pricing and supplier information.',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Search keyword for products (e.g., "steel", "cement", "copper wire")' },
+        category: { type: 'string', description: 'Filter by category name or slug (optional)' },
+        min_price: { type: 'number', description: 'Minimum price filter (optional)' },
+        max_price: { type: 'number', description: 'Maximum price filter (optional)' },
+        limit: { type: 'number', description: 'Max results to return, default 10 (optional)' },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'getCategories',
+    description: 'Get all available product categories in the Marsa Tijarah marketplace',
+    parameters: {
+      type: 'object',
+      properties: {},
+      required: [],
+    },
+  },
+  {
+    name: 'getTopSellers',
+    description: 'Get top-rated premium sellers from the Marsa Tijarah marketplace, optionally filtered by category',
+    parameters: {
+      type: 'object',
+      properties: {
+        category: { type: 'string', description: 'Filter sellers by category (optional)' },
+        limit: { type: 'number', description: 'Max results to return, default 5 (optional)' },
+      },
+      required: [],
+    },
+  },
+  {
     name: 'getAvailableSlots',
     description: 'Get available appointment time slots for a specific date',
     parameters: {

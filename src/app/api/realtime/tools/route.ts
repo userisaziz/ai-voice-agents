@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminSupabase } from '@/lib/supabase/admin';
 import { getAvailableSlots } from '@/services/appointments';
+import { searchProducts, getCategories, getTopSellers } from '@/services/marsa-tijarah';
 import type { Business } from '@/types';
 
 export async function OPTIONS() {
@@ -260,6 +261,54 @@ export async function POST(req: NextRequest) {
         result = {
           success: true,
           message: `Callback scheduled for ${args.name} at ${args.phone}. ${args.preferred_time ? `Preferred time: ${args.preferred_time}.` : ''} The team will call you back shortly.`,
+        };
+        break;
+      }
+
+      case 'searchProducts': {
+        const args = toolArgs as {
+          query: string;
+          category?: string;
+          min_price?: number;
+          max_price?: number;
+          limit?: number;
+        };
+
+        if (!args.query) {
+          result = { error: 'Search query is required' };
+          break;
+        }
+
+        const productResult = await searchProducts(args);
+        result = {
+          query: args.query,
+          products: productResult.products,
+          total: productResult.total,
+          message: productResult.total === 0
+            ? `No products found for "${args.query}". Try a different search term or browse categories.`
+            : `Found ${productResult.total} product(s) matching "${args.query}".`,
+        };
+        break;
+      }
+
+      case 'getCategories': {
+        const catResult = await getCategories();
+        result = {
+          categories: catResult.categories,
+          total: catResult.categories.length,
+        };
+        break;
+      }
+
+      case 'getTopSellers': {
+        const args = toolArgs as { category?: string; limit?: number } | undefined;
+        const sellerResult = await getTopSellers(args || {});
+        result = {
+          sellers: sellerResult.sellers,
+          total: sellerResult.sellers.length,
+          message: sellerResult.sellers.length === 0
+            ? 'No premium sellers available at the moment.'
+            : `Found ${sellerResult.sellers.length} top-rated premium seller(s).`,
         };
         break;
       }
