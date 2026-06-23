@@ -2,12 +2,12 @@
 
 import { useState } from 'react';
 import { motion } from 'framer-motion';
-import { Phone, Plus, Trash2, ToggleLeft, ToggleRight } from 'lucide-react';
+import { Phone, Plus, Trash2, ToggleLeft, ToggleRight, Radio } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { Badge } from '@/components/ui/Badge';
-import { CALL_DIRECTIONS } from '@/constants';
+import { CALL_DIRECTIONS, TELEPHONY_PROVIDERS } from '@/constants';
 import type { PhoneNumber, TelephonyProvider } from '@/types';
 
 interface PhoneNumberManagerProps {
@@ -16,13 +16,20 @@ interface PhoneNumberManagerProps {
   onAdd: (data: { number: string; friendly_name: string; provider_id: string; direction: string }) => Promise<void>;
   onUpdate: (id: string, data: Partial<PhoneNumber>) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
+  /** Called when user wants to create a new provider inline from this tab */
+  onAddProvider?: () => void;
 }
 
-export function PhoneNumberManager({ phoneNumbers, providers, onAdd, onUpdate, onDelete }: PhoneNumberManagerProps) {
+const NEW_PROVIDER_VALUE = '__new_provider__';
+
+export function PhoneNumberManager({ phoneNumbers, providers, onAdd, onUpdate, onDelete, onAddProvider }: PhoneNumberManagerProps) {
   const [showAdd, setShowAdd] = useState(false);
   const [newNumber, setNewNumber] = useState({ number: '', friendly_name: '', provider_id: '', direction: 'both' });
   const [adding, setAdding] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+
+  const activeProviders = providers.filter(p => p.is_active);
+  const hasProviders = activeProviders.length > 0;
 
   const handleAdd = async () => {
     if (!newNumber.number || !newNumber.provider_id) return;
@@ -40,14 +47,73 @@ export function PhoneNumberManager({ phoneNumbers, providers, onAdd, onUpdate, o
     await onUpdate(pn.id, { is_active: !pn.is_active });
   };
 
+  const handleProviderSelect = (value: string) => {
+    if (value === NEW_PROVIDER_VALUE) {
+      onAddProvider?.();
+    } else {
+      setNewNumber(prev => ({ ...prev, provider_id: value }));
+    }
+  };
+
   const getDirectionBadge = (direction: string) => {
     const config = CALL_DIRECTIONS.find(d => d.value === direction);
     const variant = direction === 'inbound' ? 'blue' : direction === 'outbound' ? 'purple' : 'green';
     return <Badge variant={variant as 'blue' | 'purple' | 'green'}>{config?.label || direction}</Badge>;
   };
 
+  // Build provider options with a "+ New Provider" action item
+  const providerOptions = [
+    ...activeProviders.map(p => ({
+      value: p.id,
+      label: `${p.name} (${TELEPHONY_PROVIDERS.find(tp => tp.value === p.provider_type)?.label || p.provider_type})`,
+    })),
+    ...(onAddProvider
+      ? [{ value: NEW_PROVIDER_VALUE, label: '+ Set up new provider...' }]
+      : []),
+  ];
+
   return (
     <div className="space-y-4">
+      {/* No providers - actionable prompt to create one */}
+      {!hasProviders && onAddProvider && (
+        <motion.div
+          initial={{ opacity: 0, y: -8 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="p-4 rounded-xl"
+          style={{ background: 'rgba(34,197,94,0.05)', border: '1px solid rgba(34,197,94,0.15)' }}
+        >
+          <div className="flex items-start gap-3">
+            <Radio className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: '#4ade80' }} />
+            <div className="flex-1">
+              <div className="text-[13px] font-semibold" style={{ color: '#e2e8f0' }}>Set up a provider first</div>
+              <div className="text-[12px] mt-1" style={{ color: '#3d5060' }}>
+                Choose any provider type — Twilio, Vapi, Vobiz, or SIP Trunk — and configure it to start adding phone numbers.
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {TELEPHONY_PROVIDERS.map(p => (
+                  <span
+                    key={p.value}
+                    className="px-2.5 py-1 rounded-lg text-[11px] font-medium"
+                    style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', color: '#94a3b8' }}
+                  >
+                    {p.label}
+                  </span>
+                ))}
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                className="mt-3"
+                icon={<Plus className="w-3.5 h-3.5" />}
+                onClick={onAddProvider}
+              >
+                Add Provider
+              </Button>
+            </div>
+          </div>
+        </motion.div>
+      )}
+
       {/* Add new number form */}
       {showAdd ? (
         <motion.div
@@ -75,9 +141,9 @@ export function PhoneNumberManager({ phoneNumbers, providers, onAdd, onUpdate, o
           <div className="grid grid-cols-2 gap-3">
             <Select
               label="Provider"
-              options={providers.filter(p => p.is_active).map(p => ({ value: p.id, label: `${p.name} (${p.provider_type})` }))}
+              options={providerOptions}
               value={newNumber.provider_id}
-              onChange={(e) => setNewNumber(prev => ({ ...prev, provider_id: e.target.value }))}
+              onChange={(e) => handleProviderSelect(e.target.value)}
               required
             />
             <Select
@@ -89,15 +155,31 @@ export function PhoneNumberManager({ phoneNumbers, providers, onAdd, onUpdate, o
           </div>
           <div className="flex justify-end gap-3 pt-1">
             <Button variant="secondary" size="sm" onClick={() => setShowAdd(false)}>Cancel</Button>
-            <Button size="sm" loading={adding} disabled={!newNumber.number || !newNumber.provider_id} onClick={handleAdd}>
+            <Button size="sm" loading={adding} disabled={!newNumber.number || !newNumber.provider_id || newNumber.provider_id === NEW_PROVIDER_VALUE} onClick={handleAdd}>
               Add Number
             </Button>
           </div>
         </motion.div>
       ) : (
-        <Button variant="outline" size="sm" icon={<Plus className="w-3.5 h-3.5" />} onClick={() => setShowAdd(true)}>
-          Add Phone Number
-        </Button>
+        <div className="flex items-center gap-3">
+          <Button
+            variant="outline"
+            size="sm"
+            icon={<Plus className="w-3.5 h-3.5" />}
+            onClick={() => {
+              if (!hasProviders && onAddProvider) {
+                onAddProvider();
+              } else {
+                setShowAdd(true);
+              }
+            }}
+          >
+            Add Phone Number
+          </Button>
+          {!hasProviders && onAddProvider && (
+            <span className="text-[11px]" style={{ color: '#3d5060' }}>You&apos;ll be prompted to set up a provider first</span>
+          )}
+        </div>
       )}
 
       {/* Phone number list */}
@@ -105,7 +187,11 @@ export function PhoneNumberManager({ phoneNumbers, providers, onAdd, onUpdate, o
         <div className="text-center py-8">
           <Phone className="w-8 h-8 mx-auto mb-2" style={{ color: '#3d5060' }} />
           <div className="text-[13px] font-semibold" style={{ color: '#e2e8f0' }}>No phone numbers</div>
-          <div className="text-[11px]" style={{ color: '#3d5060' }}>Add a phone number to get started</div>
+          <div className="text-[11px]" style={{ color: '#3d5060' }}>
+            {hasProviders
+              ? 'Add a phone number to get started'
+              : 'Configure a provider first, then add phone numbers'}
+          </div>
         </div>
       ) : (
         <div className="space-y-2">
@@ -132,6 +218,11 @@ export function PhoneNumberManager({ phoneNumbers, providers, onAdd, onUpdate, o
                 </div>
                 <div className="text-[11px] mt-0.5" style={{ color: '#3d5060' }}>
                   {pn.friendly_name || 'No name'} · {pn.provider?.name || 'Unknown provider'}
+                  {pn.provider?.provider_type && (
+                    <span className="ml-1 px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase" style={{ background: 'rgba(255,255,255,0.05)', color: '#94a3b8' }}>
+                      {TELEPHONY_PROVIDERS.find(tp => tp.value === pn.provider?.provider_type)?.label || pn.provider.provider_type}
+                    </span>
+                  )}
                 </div>
               </div>
               <div className="flex items-center gap-1.5 flex-shrink-0">

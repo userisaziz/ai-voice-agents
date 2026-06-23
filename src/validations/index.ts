@@ -113,12 +113,32 @@ export const vapiCredentialsSchema = z.object({
 export const vobizCredentialsSchema = z.object({
   apiKey: z.string().min(1, 'API Key is required'),
   userId: z.string().optional(),
+  sipTrunkId: z.string().min(1, 'SIP Trunk ID is required'),
+  outboundTrunkId: z.string().min(1, 'Outbound Trunk ID is required'),
+  sipDomain: z.string().min(1, 'SIP Domain is required'),
+  sipUsername: z.string().min(1, 'SIP Username is required'),
+  sipPassword: z.string().min(1, 'SIP Password is required'),
+  outboundNumber: z.string().min(10, 'Enter a valid outbound number'),
+  defaultTransferNumber: z.string().min(10, 'Enter a valid transfer number'),
+});
+
+export const sipCredentialsSchema = z.object({
+  sipTrunkId: z.string().min(1, 'SIP Trunk ID is required'),
+  outboundTrunkId: z.string().min(1, 'Outbound Trunk ID is required'),
+  sipDomain: z.string().min(1, 'SIP Domain is required'),
+  sipUsername: z.string().min(1, 'SIP Username is required'),
+  sipPassword: z.string().min(1, 'SIP Password is required'),
+  outboundNumber: z.string().min(10, 'Enter a valid outbound number'),
+  defaultTransferNumber: z.string().min(10, 'Enter a valid transfer number'),
+  sipRegistrar: z.string().optional(),
+  sipPort: z.string().optional(),
+  sipTransport: z.enum(['udp', 'tcp', 'tls']).optional(),
 });
 
 export const telephonyProviderSchema = z.object({
   name: z.string().min(2, 'Provider name must be at least 2 characters').max(100),
-  provider_type: z.enum(['twilio', 'vapi', 'vobiz']),
-  credentials: z.union([twilioCredentialsSchema, vapiCredentialsSchema, vobizCredentialsSchema]),
+  provider_type: z.enum(['twilio', 'vapi', 'vobiz', 'sip']),
+  credentials: z.union([twilioCredentialsSchema, vapiCredentialsSchema, vobizCredentialsSchema, sipCredentialsSchema]),
   is_default: z.boolean().default(false),
   is_active: z.boolean().default(true),
   webhook_url: z.string().url('Enter a valid URL').optional().or(z.literal('')),

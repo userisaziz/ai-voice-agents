@@ -18,7 +18,7 @@ import { useToast } from '@/components/ui/Toast';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { agentSchema, type AgentFormData } from '@/validations';
-import { AGENT_VOICES, AGENT_PERSONALITIES, INTERRUPT_SENSITIVITIES, SUGGESTED_AGENTS } from '@/constants';
+import { AGENT_VOICES, AGENT_PERSONALITIES, AGENT_LANGUAGES, INTERRUPT_SENSITIVITIES, SUGGESTED_AGENTS } from '@/constants';
 import type { Agent } from '@/types';
 
 export default function AgentsPage() {
@@ -143,6 +143,44 @@ export default function AgentsPage() {
     }
   };
 
+  // Show guidance when business profile isn't set up yet
+  if (!business && !loading) {
+    return (
+      <div className="space-y-5">
+        <Card>
+          <CardHeader
+            title="AI Agents"
+            description="Configure your AI voice agents"
+          />
+          <div className="flex flex-col items-center justify-center py-16 text-center">
+            <div className="w-16 h-16 rounded-full flex items-center justify-center mb-4" style={{ background: 'rgba(34,197,94,0.1)', border: '1px solid rgba(34,197,94,0.2)' }}>
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="10" />
+                <line x1="12" y1="8" x2="12" y2="12" />
+                <line x1="12" y1="16" x2="12.01" y2="16" />
+              </svg>
+            </div>
+            <h3 className="text-[15px] font-semibold mb-2" style={{ color: '#e2e8f0' }}>Business Profile Required</h3>
+            <p className="text-[13px] max-w-md mb-6" style={{ color: '#4b6070' }}>
+              A business profile must be configured before creating agents. This links agents to the correct business data and services.
+            </p>
+            <a
+              href="/dashboard/settings"
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg text-[13px] font-semibold text-white transition-all"
+              style={{ background: '#22c55e', boxShadow: '0 4px 12px rgba(34,197,94,0.3)' }}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="3" />
+                <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z" />
+              </svg>
+              Set Up Business Profile
+            </a>
+          </div>
+        </Card>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-5">
       <Card>
@@ -247,8 +285,9 @@ export default function AgentsPage() {
           <Input label="Agent Name" placeholder="Reception AI" error={errors.name?.message} {...register('name')} required />
           <div className="grid grid-cols-2 gap-4">
             <Select label="Voice" options={AGENT_VOICES.map((v) => ({ value: v.value, label: v.label }))} error={errors.voice?.message} {...register('voice')} />
-            <Select label="Personality" options={AGENT_PERSONALITIES.map((p) => ({ value: p.value, label: p.label }))} error={errors.personality?.message} {...register('personality')} />
+            <Select label="Language" options={AGENT_LANGUAGES.map((l) => ({ value: l.value, label: l.label }))} error={errors.language?.message} {...register('language')} />
           </div>
+          <Select label="Personality" options={AGENT_PERSONALITIES.map((p) => ({ value: p.value, label: p.label }))} error={errors.personality?.message} {...register('personality')} />
           <Select label="Interruption Sensitivity" options={INTERRUPT_SENSITIVITIES.map((i) => ({ value: i.value, label: i.label }))} {...register('interrupt_sensitivity')} />
           <Textarea label="Greeting Message" rows={2} placeholder="Hello! Thank you for calling..." {...register('greeting_message')} />
           <Textarea label="System Prompt" rows={5} placeholder="You are a professional receptionist..." hint="Instructions for how the AI should behave" {...register('system_prompt')} />

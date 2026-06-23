@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { Shield, TestTube, CheckCircle, XCircle } from 'lucide-react';
+import { Shield, TestTube, CheckCircle, XCircle, Server, Phone, Key } from 'lucide-react';
 import { telephonyProviderSchema, type TelephonyProviderFormData } from '@/validations';
 import { TELEPHONY_PROVIDERS } from '@/constants';
 import { Input } from '@/components/ui/Input';
@@ -40,6 +40,7 @@ export function ProviderConfigForm({ provider, onSubmit, onTest, onCancel }: Pro
   });
 
   const providerType = watch('provider_type');
+  const credErrors = errors.credentials as Record<string, { message?: string }> | undefined;
 
   const handleTest = async () => {
     if (!onTest) return;
@@ -48,12 +49,35 @@ export function ProviderConfigForm({ provider, onSubmit, onTest, onCancel }: Pro
 
     const credentials = providerType === 'twilio'
       ? { accountSid: watch('credentials.accountSid' as never), authToken: watch('credentials.authToken' as never) }
-      : { apiKey: watch('credentials.apiKey' as never) };
+      : providerType === 'vapi'
+      ? { apiKey: watch('credentials.apiKey' as never), assistantId: watch('credentials.assistantId' as never) }
+      : providerType === 'vobiz'
+      ? {
+          apiKey: watch('credentials.apiKey' as never),
+          sipTrunkId: watch('credentials.sipTrunkId' as never),
+          outboundTrunkId: watch('credentials.outboundTrunkId' as never),
+          sipDomain: watch('credentials.sipDomain' as never),
+          sipUsername: watch('credentials.sipUsername' as never),
+          sipPassword: watch('credentials.sipPassword' as never),
+          outboundNumber: watch('credentials.outboundNumber' as never),
+          defaultTransferNumber: watch('credentials.defaultTransferNumber' as never),
+        }
+      : {
+          sipTrunkId: watch('credentials.sipTrunkId' as never),
+          outboundTrunkId: watch('credentials.outboundTrunkId' as never),
+          sipDomain: watch('credentials.sipDomain' as never),
+          sipUsername: watch('credentials.sipUsername' as never),
+          sipPassword: watch('credentials.sipPassword' as never),
+          outboundNumber: watch('credentials.outboundNumber' as never),
+          defaultTransferNumber: watch('credentials.defaultTransferNumber' as never),
+        };
 
     const result = await onTest(providerType, credentials);
     setTestResult(result);
     setTesting(false);
   };
+
+  const sectionStyle = { background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.07)' };
 
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
@@ -72,8 +96,9 @@ export function ProviderConfigForm({ provider, onSubmit, onTest, onCancel }: Pro
         {...register('provider_type')}
       />
 
+      {/* ========== TWILIO ========== */}
       {providerType === 'twilio' && (
-        <div className="space-y-3 p-4 rounded-xl" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.07)' }}>
+        <div className="space-y-3 p-4 rounded-xl" style={sectionStyle}>
           <div className="flex items-center gap-2 mb-3">
             <Shield className="w-4 h-4" style={{ color: '#4ade80' }} />
             <span className="text-[13px] font-semibold" style={{ color: '#e2e8f0' }}>Twilio Credentials</span>
@@ -81,7 +106,7 @@ export function ProviderConfigForm({ provider, onSubmit, onTest, onCancel }: Pro
           <Input
             label="Account SID"
             placeholder="ACxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-            error={(errors.credentials as Record<string, { message?: string }>)?.accountSid?.message}
+            error={credErrors?.accountSid?.message}
             {...register('credentials.accountSid' as never)}
             required
           />
@@ -89,27 +114,238 @@ export function ProviderConfigForm({ provider, onSubmit, onTest, onCancel }: Pro
             label="Auth Token"
             placeholder="Your auth token"
             type="password"
-            error={(errors.credentials as Record<string, { message?: string }>)?.authToken?.message}
+            error={credErrors?.authToken?.message}
             {...register('credentials.authToken' as never)}
             required
           />
         </div>
       )}
 
-      {(providerType === 'vapi' || providerType === 'vobiz') && (
-        <div className="space-y-3 p-4 rounded-xl" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.07)' }}>
+      {/* ========== VAPI ========== */}
+      {providerType === 'vapi' && (
+        <div className="space-y-3 p-4 rounded-xl" style={sectionStyle}>
           <div className="flex items-center gap-2 mb-3">
             <Shield className="w-4 h-4" style={{ color: '#4ade80' }} />
-            <span className="text-[13px] font-semibold" style={{ color: '#e2e8f0' }}>{providerType === 'vapi' ? 'Vapi' : 'Vobiz'} Credentials</span>
+            <span className="text-[13px] font-semibold" style={{ color: '#e2e8f0' }}>Vapi Credentials</span>
           </div>
           <Input
             label="API Key"
-            placeholder="Your API key"
+            placeholder="Your Vapi API key"
             type="password"
-            error={(errors.credentials as Record<string, { message?: string }>)?.apiKey?.message}
+            error={credErrors?.apiKey?.message}
             {...register('credentials.apiKey' as never)}
             required
           />
+          <Input
+            label="Assistant ID (optional)"
+            placeholder="Vapi assistant ID"
+            error={credErrors?.assistantId?.message}
+            {...register('credentials.assistantId' as never)}
+          />
+        </div>
+      )}
+
+      {/* ========== VOBIZ (API + SIP Trunk) ========== */}
+      {providerType === 'vobiz' && (
+        <div className="space-y-4">
+          {/* API Section */}
+          <div className="space-y-3 p-4 rounded-xl" style={sectionStyle}>
+            <div className="flex items-center gap-2 mb-3">
+              <Key className="w-4 h-4" style={{ color: '#4ade80' }} />
+              <span className="text-[13px] font-semibold" style={{ color: '#e2e8f0' }}>Vobiz API Credentials</span>
+            </div>
+            <Input
+              label="API Key"
+              placeholder="Your Vobiz API key"
+              type="password"
+              error={credErrors?.apiKey?.message}
+              {...register('credentials.apiKey' as never)}
+              required
+            />
+            <Input
+              label="User ID (optional)"
+              placeholder="Vobiz user ID"
+              error={credErrors?.userId?.message}
+              {...register('credentials.userId' as never)}
+            />
+          </div>
+
+          {/* SIP Trunk Section */}
+          <div className="space-y-3 p-4 rounded-xl" style={sectionStyle}>
+            <div className="flex items-center gap-2 mb-3">
+              <Server className="w-4 h-4" style={{ color: '#60a5fa' }} />
+              <span className="text-[13px] font-semibold" style={{ color: '#e2e8f0' }}>SIP Trunk Configuration</span>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <Input
+                label="SIP Trunk ID"
+                placeholder="your_trunk_id"
+                error={credErrors?.sipTrunkId?.message}
+                {...register('credentials.sipTrunkId' as never)}
+                required
+              />
+              <Input
+                label="Outbound Trunk ID"
+                placeholder="your_outbound_trunk_id"
+                error={credErrors?.outboundTrunkId?.message}
+                {...register('credentials.outboundTrunkId' as never)}
+                required
+              />
+            </div>
+            <Input
+              label="SIP Domain"
+              placeholder="your_sip_domain (e.g. sip.vobiz.com)"
+              error={credErrors?.sipDomain?.message}
+              {...register('credentials.sipDomain' as never)}
+              required
+            />
+            <div className="grid grid-cols-2 gap-3">
+              <Input
+                label="SIP Username"
+                placeholder="your_sip_username"
+                error={credErrors?.sipUsername?.message}
+                {...register('credentials.sipUsername' as never)}
+                required
+              />
+              <Input
+                label="SIP Password"
+                placeholder="your_sip_password"
+                type="password"
+                error={credErrors?.sipPassword?.message}
+                {...register('credentials.sipPassword' as never)}
+                required
+              />
+            </div>
+          </div>
+
+          {/* Phone Numbers Section */}
+          <div className="space-y-3 p-4 rounded-xl" style={sectionStyle}>
+            <div className="flex items-center gap-2 mb-3">
+              <Phone className="w-4 h-4" style={{ color: '#f59e0b' }} />
+              <span className="text-[13px] font-semibold" style={{ color: '#e2e8f0' }}>Phone Number Configuration</span>
+            </div>
+            <Input
+              label="Outbound Number"
+              placeholder="+91XXXXXXXXXX"
+              error={credErrors?.outboundNumber?.message}
+              {...register('credentials.outboundNumber' as never)}
+              required
+            />
+            <Input
+              label="Default Transfer Number"
+              placeholder="+91XXXXXXXXXX"
+              error={credErrors?.defaultTransferNumber?.message}
+              {...register('credentials.defaultTransferNumber' as never)}
+              required
+            />
+          </div>
+        </div>
+      )}
+
+      {/* ========== SIP TRUNK (Generic) ========== */}
+      {providerType === 'sip' && (
+        <div className="space-y-4">
+          {/* SIP Trunk Section */}
+          <div className="space-y-3 p-4 rounded-xl" style={sectionStyle}>
+            <div className="flex items-center gap-2 mb-3">
+              <Server className="w-4 h-4" style={{ color: '#60a5fa' }} />
+              <span className="text-[13px] font-semibold" style={{ color: '#e2e8f0' }}>SIP Trunk Configuration</span>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <Input
+                label="SIP Trunk ID"
+                placeholder="your_trunk_id"
+                error={credErrors?.sipTrunkId?.message}
+                {...register('credentials.sipTrunkId' as never)}
+                required
+              />
+              <Input
+                label="Outbound Trunk ID"
+                placeholder="your_outbound_trunk_id"
+                error={credErrors?.outboundTrunkId?.message}
+                {...register('credentials.outboundTrunkId' as never)}
+                required
+              />
+            </div>
+            <Input
+              label="SIP Domain"
+              placeholder="your_sip_domain (e.g. sip.provider.com)"
+              error={credErrors?.sipDomain?.message}
+              {...register('credentials.sipDomain' as never)}
+              required
+            />
+            <div className="grid grid-cols-2 gap-3">
+              <Input
+                label="SIP Username"
+                placeholder="your_sip_username"
+                error={credErrors?.sipUsername?.message}
+                {...register('credentials.sipUsername' as never)}
+                required
+              />
+              <Input
+                label="SIP Password"
+                placeholder="your_sip_password"
+                type="password"
+                error={credErrors?.sipPassword?.message}
+                {...register('credentials.sipPassword' as never)}
+                required
+              />
+            </div>
+          </div>
+
+          {/* Phone Numbers Section */}
+          <div className="space-y-3 p-4 rounded-xl" style={sectionStyle}>
+            <div className="flex items-center gap-2 mb-3">
+              <Phone className="w-4 h-4" style={{ color: '#f59e0b' }} />
+              <span className="text-[13px] font-semibold" style={{ color: '#e2e8f0' }}>Phone Number Configuration</span>
+            </div>
+            <Input
+              label="Outbound Number"
+              placeholder="+91XXXXXXXXXX"
+              error={credErrors?.outboundNumber?.message}
+              {...register('credentials.outboundNumber' as never)}
+              required
+            />
+            <Input
+              label="Default Transfer Number"
+              placeholder="+91XXXXXXXXXX"
+              error={credErrors?.defaultTransferNumber?.message}
+              {...register('credentials.defaultTransferNumber' as never)}
+              required
+            />
+          </div>
+
+          {/* Advanced SIP Settings */}
+          <div className="space-y-3 p-4 rounded-xl" style={sectionStyle}>
+            <div className="flex items-center gap-2 mb-3">
+              <Shield className="w-4 h-4" style={{ color: '#a78bfa' }} />
+              <span className="text-[13px] font-semibold" style={{ color: '#e2e8f0' }}>Advanced SIP Settings (optional)</span>
+            </div>
+            <Input
+              label="SIP Registrar"
+              placeholder="sip.provider.com"
+              error={credErrors?.sipRegistrar?.message}
+              {...register('credentials.sipRegistrar' as never)}
+            />
+            <div className="grid grid-cols-2 gap-3">
+              <Input
+                label="SIP Port"
+                placeholder="5060"
+                error={credErrors?.sipPort?.message}
+                {...register('credentials.sipPort' as never)}
+              />
+              <Select
+                label="Transport"
+                options={[
+                  { value: 'udp', label: 'UDP' },
+                  { value: 'tcp', label: 'TCP' },
+                  { value: 'tls', label: 'TLS' },
+                ]}
+                error={credErrors?.sipTransport?.message}
+                {...register('credentials.sipTransport' as never)}
+              />
+            </div>
+          </div>
         </div>
       )}
 
@@ -120,7 +356,7 @@ export function ProviderConfigForm({ provider, onSubmit, onTest, onCancel }: Pro
         {...register('webhook_url')}
       />
 
-      <div className="flex items-center justify-between p-4 rounded-xl" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.07)' }}>
+      <div className="flex items-center justify-between p-4 rounded-xl" style={sectionStyle}>
         <div>
           <div className="text-[13px] font-semibold" style={{ color: '#e2e8f0' }}>Default Provider</div>
           <div className="text-[11px]" style={{ color: '#3d5060' }}>Use this provider for new phone numbers</div>

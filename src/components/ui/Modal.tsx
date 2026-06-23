@@ -47,7 +47,7 @@ export function Modal({ isOpen, onClose, title, description, children, size = 'm
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.96, y: 8 }}
             transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
-            className={cn('relative w-full rounded-xl z-10 overflow-hidden', sizes[size], className)}
+            className={cn('relative w-full rounded-xl z-10 overflow-hidden flex flex-col max-h-[90vh]', sizes[size], className)}
             style={{ background: '#0d1518', border: '1px solid rgba(255,255,255,0.1)', boxShadow: '0 20px 60px rgba(0,0,0,0.6)' }}
           >
             {/* Top accent */}
@@ -55,7 +55,7 @@ export function Modal({ isOpen, onClose, title, description, children, size = 'm
               style={{ background: 'linear-gradient(90deg,#22c55e,#16a34a,#22c55e)' }} />
 
             {(title || description) && (
-              <div className="flex items-start justify-between px-5 pt-5 pb-4"
+              <div className="flex items-start justify-between px-5 pt-5 pb-4 flex-shrink-0"
                 style={{ borderBottom: '1px solid rgba(255,255,255,0.07)' }}>
                 <div>
                   {title && <h2 className="text-[14px] font-bold tracking-tight" style={{ color: '#e2e8f0' }}>{title}</h2>}
@@ -83,7 +83,7 @@ export function Modal({ isOpen, onClose, title, description, children, size = 'm
                 <X className="w-4 h-4" />
               </button>
             )}
-            <div className="px-5 py-5">{children}</div>
+            <div className="px-5 py-5 overflow-y-auto flex-1">{children}</div>
           </motion.div>
         </div>
       )}

@@ -463,7 +463,7 @@ create table if not exists telephony_providers (
   id uuid primary key default uuid_generate_v4(),
   business_id uuid not null references businesses(id) on delete cascade,
   name text not null,
-  provider_type text not null check (provider_type in ('twilio', 'vapi', 'vobiz')),
+  provider_type text not null check (provider_type in ('twilio', 'vapi', 'vobiz', 'sip')),
   credentials jsonb not null,
   is_default boolean not null default false,
   is_active boolean not null default true,

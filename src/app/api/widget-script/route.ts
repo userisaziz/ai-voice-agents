@@ -14,19 +14,20 @@ export async function GET(_req: NextRequest) {
   var config = {};
   var widget = null;
   var fabEl = null;
-  var pc = null;
-  var dc = null;
+  var ws = null;
   var localStream = null;
-  var audioEl = null;
   var conversationId = null;
   var callStartTime = null;
-  var currentAssistantMsg = null;
-  var currentAssistantText = '';
   var pendingSaves = [];
   var muted = false;
   var waveInterval = null;
   var pulseAnimFrame = null;
   var APP_URL = '${appUrl}';
+  var micContext = null;
+  var playbackContext = null;
+  var playbackNode = null;
+  var socketOpen = false;
+  var audioQueue = [];
 
   /* ─── Public API ─────────────────────────────────────── */
   window.VoiceDesk = {
@@ -448,14 +449,71 @@ export async function GET(_req: NextRequest) {
     if (msgArea) msgArea.scrollTop = msgArea.scrollHeight;
   }
 
-  /* ─── Voice connection ───────────────────────────────── */
+  /* ─── Playback worklet (ring buffer) ─────────────────── */
+  async function setupPlayback(ctx) {
+    var code = 'class P extends AudioWorkletProcessor{' +
+      'constructor(){super();this._b=new Float32Array(0);' +
+      'this.port.onmessage=function(e){' +
+      'if(e.data&&e.data.type==="flush"){this._b=new Float32Array(0);return}' +
+      'var i=new Int16Array(e.data),f=new Float32Array(i.length);' +
+      'for(var j=0;j<i.length;j++)f[j]=i[j]/32768;' +
+      'var m=new Float32Array(this._b.length+f.length);' +
+      'm.set(this._b);m.set(f,this._b.length);this._b=m}.bind(this)}' +
+      'process(_,o){var out=o[0][0];if(!out)return true;' +
+      'if(this._b.length>=out.length){out.set(this._b.subarray(0,out.length));' +
+      'this._b=this._b.subarray(out.length)}return true}};' +
+      'registerProcessor("vd-playback",P);';
+    var blob = new Blob([code], { type: 'application/javascript' });
+    var url = URL.createObjectURL(blob);
+    await ctx.audioWorklet.addModule(url);
+    URL.revokeObjectURL(url);
+    var node = new AudioWorkletNode(ctx, 'vd-playback');
+    node.connect(ctx.destination);
+    return node;
+  }
+
+  /* ─── Mic capture worklet ────────────────────────────── */
+  async function setupMic(ctx, stream, onChunk) {
+    var code = 'class M extends AudioWorkletProcessor{' +
+      'process(i){var inp=i[0]&&i[0][0];if(!inp)return true;' +
+      'var p=new Int16Array(inp.length);' +
+      'for(var j=0;j<inp.length;j++){var s=Math.max(-1,Math.min(1,inp[j]));' +
+      'p[j]=s<0?s*0x8000:s*0x7fff}' +
+      'this.port.postMessage(p.buffer,[p.buffer]);return true}};' +
+      'registerProcessor("vd-mic",M);';
+    var blob = new Blob([code], { type: 'application/javascript' });
+    var url = URL.createObjectURL(blob);
+    await ctx.audioWorklet.addModule(url);
+    URL.revokeObjectURL(url);
+    var src = ctx.createMediaStreamSource(stream);
+    var node = new AudioWorkletNode(ctx, 'vd-mic');
+    node.port.onmessage = function(e) { onChunk(e.data); };
+    src.connect(node);
+    return node;
+  }
+
+  /* ─── Play binary audio (PCM 16-bit, skip WAV header) ── */
+  function playAudio(data) {
+    if (data instanceof ArrayBuffer || data instanceof Blob) {
+      var processAb = function(ab) {
+        var h = new Uint8Array(ab, 0, 4);
+        var isWav = h[0]===0x52 && h[1]===0x49 && h[2]===0x46 && h[3]===0x46;
+        var pcm = isWav ? ab.slice(44) : ab;
+        if (playbackNode) playbackNode.port.postMessage(pcm, [pcm]);
+      };
+      if (data instanceof Blob) { data.arrayBuffer().then(processAb); }
+      else { processAb(data); }
+    }
+  }
+
+  /* ─── Voice connection (Deepgram WebSocket) ──────────── */
   async function startVoice() {
     var startBtn = widget.querySelector('#voicedesk-start-btn');
     startBtn.disabled = true;
     setStatusText('Connecting…');
 
     try {
-      /* Phase 1: fetch session config from our backend (JSON) */
+      /* Phase 1: fetch session config from our backend */
       var res = await fetch(APP_URL + '/api/realtime/session', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -464,61 +522,83 @@ export async function GET(_req: NextRequest) {
       var sessionData = await res.json();
       if (sessionData.error) throw new Error(sessionData.error);
       conversationId = sessionData.conversationId;
-      var model = sessionData.model || 'gpt-realtime';
 
-      pc = new RTCPeerConnection();
-      audioEl = new Audio();
-      audioEl.autoplay = true;
-      pc.ontrack = function(e) { audioEl.srcObject = e.streams[0]; };
+      /* Phase 2: get Deepgram API key */
+      var keyRes = await fetch(APP_URL + '/api/deepgram-token');
+      if (!keyRes.ok) throw new Error('Failed to get API key');
+      var apiKey = await keyRes.text();
 
-      localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      localStream.getTracks().forEach(function(t) { pc.addTrack(t, localStream); });
+      /* Phase 3: open WebSocket to Deepgram Voice Agent */
+      ws = new WebSocket('wss://agent.deepgram.com/v1/agent/converse', ['token', apiKey.trim()]);
+      ws.binaryType = 'arraybuffer';
 
-      dc = pc.createDataChannel('oai-events');
-      dc.onopen = function() {
+      ws.onopen = function() {
+        socketOpen = true;
+        /* Send agent settings */
+        ws.send(JSON.stringify({
+          type: 'Settings',
+          audio: {
+            input: { encoding: 'linear16', sample_rate: 16000 },
+            output: { encoding: 'linear16', sample_rate: 24000, container: 'none' },
+          },
+          agent: {
+            listen: { provider: { version: 'v1', type: 'deepgram', model: 'nova-3-general-en' } },
+            think: {
+              provider: { type: 'open_ai', model: 'gpt-4o-mini' },
+              prompt: sessionData.systemPrompt,
+              functions: sessionData.functions || sessionData.tools || [],
+            },
+            speak: { provider: { type: 'deepgram', model: 'aura-2-thalia-en' } },
+            greeting: sessionData.greeting || 'Hello! How can I help you today?',
+          },
+        }));
+
+        /* Flush queued mic frames */
+        for (var i = 0; i < audioQueue.length; i++) ws.send(audioQueue[i]);
+        audioQueue = [];
+
         callStartTime = Date.now();
         muted = false;
         showActive();
         setCallState('listening');
-        /* Trigger the greeting */
-        dc.send(JSON.stringify({ type: 'response.create' }));
-      };
-      dc.onmessage = function(e) {
-        try { handleEvent(JSON.parse(e.data)); } catch(_) {}
       };
 
-      var offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
+      ws.onmessage = function(e) {
+        /* Binary = audio */
+        if (e.data instanceof ArrayBuffer || e.data instanceof Blob) {
+          playAudio(e.data);
+          return;
+        }
+        /* String = JSON event */
+        try { handleDgEvent(JSON.parse(e.data)); } catch(_) {}
+      };
 
-      /* Wait for ICE gathering to complete before sending SDP */
-      var completeSdp = await new Promise(function(resolve) {
-        if (pc.iceGatheringState === 'complete') {
-          resolve(pc.localDescription.sdp);
+      ws.onerror = function(err) {
+        console.error('[VoiceDesk WS]', err);
+        setStatusText('Connection error');
+      };
+
+      ws.onclose = function() {
+        socketOpen = false;
+        audioQueue = [];
+      };
+
+      /* Phase 4: mic capture */
+      localStream = await navigator.mediaDevices.getUserMedia({
+        audio: { channelCount: 1, sampleRate: 16000, echoCancellation: true, noiseSuppression: true },
+      });
+
+      micContext = new AudioContext({ sampleRate: 16000 });
+      playbackContext = new AudioContext({ sampleRate: 24000 });
+      playbackNode = await setupPlayback(playbackContext);
+      await setupMic(micContext, localStream, function(buf) {
+        if (socketOpen && ws && ws.readyState === 1) {
+          ws.send(buf);
         } else {
-          pc.addEventListener('icegatheringstatechange', function() {
-            if (pc.iceGatheringState === 'complete') {
-              resolve(pc.localDescription.sdp);
-            }
-          });
+          audioQueue.push(buf);
         }
       });
 
-      /* Phase 2: proxy SDP + session config through our backend */
-      var sdpRes = await fetch(APP_URL + '/api/realtime/connect', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          sdp: completeSdp,
-          model: model,
-          voice: sessionData.voice,
-          instructions: sessionData.systemPrompt,
-          tools: sessionData.tools,
-          turnDetection: sessionData.turnDetection,
-        }),
-      });
-      if (!sdpRes.ok) throw new Error('SDP exchange failed: ' + sdpRes.status);
-      var answerSdp = await sdpRes.text();
-      await pc.setRemoteDescription({ type: 'answer', sdp: answerSdp });
     } catch(err) {
       console.error('[VoiceDesk]', err);
       setStatusText('Error: ' + err.message);
@@ -528,11 +608,18 @@ export async function GET(_req: NextRequest) {
 
   function endVoice() {
     stopWaveAnimation();
+    socketOpen = false;
+    audioQueue = [];
     var dur = callStartTime ? Math.round((Date.now() - callStartTime) / 1000) : null;
     callStartTime = null;
     if (localStream) { localStream.getTracks().forEach(function(t) { t.stop(); }); localStream = null; }
-    if (dc) { try { dc.close(); } catch(_) {} dc = null; }
-    if (pc) { try { pc.close(); } catch(_) {} pc = null; }
+    if (micContext && micContext.state !== 'closed') { try { micContext.close(); } catch(_) {} }
+    micContext = null;
+    if (playbackNode) { try { playbackNode.port.postMessage({ type: 'flush' }); playbackNode.disconnect(); } catch(_) {} }
+    playbackNode = null;
+    if (playbackContext && playbackContext.state !== 'closed') { try { playbackContext.close(); } catch(_) {} }
+    playbackContext = null;
+    if (ws) { try { ws.close(); } catch(_) {} ws = null; }
     if (conversationId) {
       var cid = conversationId;
       conversationId = null;
@@ -572,48 +659,74 @@ export async function GET(_req: NextRequest) {
     }
   }
 
-  /* ─── Event handling ─────────────────────────────────── */
-  function handleEvent(ev) {
-    if (ev.type === 'input_audio_buffer.speech_started') {
-      if (!muted) setCallState('listening');
-    }
-    if (ev.type === 'response.created' || ev.type === 'output_audio_buffer.started') {
-      if (!muted) setCallState('speaking');
-    }
-    /* GA: response.output_audio_transcript.delta / .done */
-    if (ev.type === 'response.output_audio_transcript.delta') {
-      if (!currentAssistantMsg) { currentAssistantMsg = addMessage('ai', ''); currentAssistantText = ''; }
-      currentAssistantText += ev.delta || '';
-      currentAssistantMsg.querySelector('.voicedesk-msg-text').textContent = currentAssistantText;
-      scrollTranscript();
-    }
-    if (ev.type === 'response.output_audio_transcript.done') {
-      var t = ev.transcript || currentAssistantText || '';
-      if (t) {
-        if (currentAssistantMsg) {
-          currentAssistantMsg.querySelector('.voicedesk-msg-text').textContent = t;
+  /* ─── Deepgram event handling ──────────────────────────── */
+  function handleDgEvent(ev) {
+    if (!ev || !ev.type) return;
+
+    switch (ev.type) {
+      case 'UserStartedSpeaking':
+        if (!muted) setCallState('listening');
+        /* Flush playback buffer to stop agent audio during interruption */
+        if (playbackNode) playbackNode.port.postMessage({ type: 'flush' });
+        break;
+
+      case 'AgentStartedSpeaking':
+        if (!muted) setCallState('speaking');
+        break;
+
+      case 'AgentAudioDone':
+        if (!muted) setCallState('listening');
+        break;
+
+      case 'ConversationText': {
+        var role = ev.role;
+        var content = ev.content || '';
+        if (!content.trim()) break;
+        if (role === 'assistant') {
+          var el = addMessage('ai', content);
+          saveMessage('assistant', content);
+        } else if (role === 'user') {
+          addMessage('user', content);
+          saveMessage('user', content);
         }
-        saveMessage('assistant', t);
+        break;
       }
-      currentAssistantMsg = null;
-      currentAssistantText = '';
-      if (!muted) setCallState('listening');
-    }
-    /* GA: user audio committed — no transcription available, show placeholder */
-    if (ev.type === 'input_audio_buffer.committed') {
-      addMessage('user', '🎤 Voice message');
-    }
-    if (ev.type === 'response.function_call_arguments.done') {
-      fetch(APP_URL + '/api/realtime/tools', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ toolName: ev.name, toolArgs: JSON.parse(ev.arguments || '{}'), businessId: config.businessId, conversationId: conversationId }),
-      }).then(function(r) { return r.json(); }).then(function(data) {
-        if (dc && dc.readyState === 'open') {
-          dc.send(JSON.stringify({ type: 'conversation.item.create', item: { type: 'function_call_output', call_id: ev.call_id, output: JSON.stringify(data.result) } }));
-          dc.send(JSON.stringify({ type: 'response.create' }));
-        }
-      }).catch(function() {});
+
+      case 'FunctionCallRequest': {
+        fetch(APP_URL + '/api/realtime/tools', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            toolName: ev.function_name,
+            toolArgs: ev.input || {},
+            businessId: config.businessId,
+            conversationId: conversationId,
+          }),
+        }).then(function(r) { return r.json(); }).then(function(data) {
+          if (ws && ws.readyState === 1) {
+            ws.send(JSON.stringify({
+              type: 'FunctionCallResponse',
+              id: ev.function_call_id,
+              name: ev.function_name,
+              content: JSON.stringify(data.result),
+            }));
+          }
+        }).catch(function() {});
+        break;
+      }
+
+      case 'Welcome':
+        console.log('[VoiceDesk] Connected');
+        break;
+
+      case 'SettingsApplied':
+        console.log('[VoiceDesk] Settings applied');
+        break;
+
+      case 'Error':
+        console.error('[VoiceDesk] Agent error:', ev.message || ev);
+        setStatusText('Error: ' + (ev.message || 'Agent error'));
+        break;
     }
   }
 

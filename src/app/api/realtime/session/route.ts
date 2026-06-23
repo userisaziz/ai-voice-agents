@@ -107,11 +107,32 @@ export async function POST(req: NextRequest) {
       const greeting = agentTyped?.greeting_message
         || `Hello! Thank you for calling ${business.name}, how can I help you today?`;
 
+      // Select TTS model based on agent language for multilingual support
+      const agentLanguage = agentTyped?.language || 'en';
+      const agentVoice = agentTyped?.voice || 'aura-2-thalia-en';
+      
+      // Map voice to language-appropriate TTS model
+      let ttsModel = agentVoice;
+      if (agentVoice === 'alloy' || !agentVoice.startsWith('aura-')) {
+        // Use multilingual default based on language
+        // Note: For Arabic, we fallback to English TTS as Deepgram Aura doesn't support Arabic natively yet
+        // For production Arabic TTS, integrate OpenAI, Eleven Labs, or Cartesia with language: "multi"
+        const multilingualDefaults: Record<string, string> = {
+          en: 'aura-2-thalia-en',
+          ar: 'aura-2-thalia-en', // Fallback - Deepgram Aura doesn't have native Arabic TTS yet
+          es: 'aura-2-thalia-en',
+          fr: 'aura-2-thalia-en',
+          de: 'aura-2-thalia-en',
+        };
+        ttsModel = multilingualDefaults[agentLanguage] || 'aura-2-thalia-en';
+      }
+
       return NextResponse.json({
         conversationId: conversation?.id,
         agentName: agentTyped?.name || 'AI Receptionist',
-        voice: agentTyped?.voice || 'alloy',
-        language: agentTyped?.language || 'en',
+        voice: agentVoice,
+        ttsModel: ttsModel,
+        language: agentLanguage,
         model: 'deepgram-voice-agent',
         systemPrompt,
         tools: REALTIME_TOOLS,       // OpenAI format (legacy)

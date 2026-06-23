@@ -230,7 +230,7 @@ export interface TranscriptEntry {
 // TELEPHONY TYPES
 // =============================================
 
-export type TelephonyProviderType = 'twilio' | 'vapi' | 'vobiz';
+export type TelephonyProviderType = 'twilio' | 'vapi' | 'vobiz' | 'sip';
 export type CallDirection = 'inbound' | 'outbound' | 'both';
 export type CampaignStatus = 'draft' | 'scheduled' | 'running' | 'completed' | 'paused' | 'cancelled';
 export type LeadCallStatus = 'pending' | 'calling' | 'completed' | 'failed' | 'skipped';
@@ -249,9 +249,29 @@ export interface VapiCredentials {
 export interface VobizCredentials {
   apiKey: string;
   userId?: string;
+  sipTrunkId: string;
+  outboundTrunkId: string;
+  sipDomain: string;
+  sipUsername: string;
+  sipPassword: string;
+  outboundNumber: string;
+  defaultTransferNumber: string;
 }
 
-export type TelephonyCredentials = TwilioCredentials | VapiCredentials | VobizCredentials;
+export interface SipCredentials {
+  sipTrunkId: string;
+  outboundTrunkId: string;
+  sipDomain: string;
+  sipUsername: string;
+  sipPassword: string;
+  outboundNumber: string;
+  defaultTransferNumber: string;
+  sipRegistrar?: string;
+  sipPort?: string;
+  sipTransport?: 'udp' | 'tcp' | 'tls';
+}
+
+export type TelephonyCredentials = TwilioCredentials | VapiCredentials | VobizCredentials | SipCredentials;
 
 export interface TelephonyProvider {
   id: string;

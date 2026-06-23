@@ -112,8 +112,8 @@ export function buildSystemPrompt(
   greetingMessage?: string | null
 ): string {
   const langInstruction = language === 'en'
-    ? 'LANGUAGE REQUIREMENT: You MUST always respond in English only, regardless of what language the customer speaks or writes in. If the customer speaks another language, politely let them know you can only assist in English and continue in English.'
-    : `LANGUAGE REQUIREMENT: You MUST always respond in the following language: ${language}. Never switch to another language under any circumstances.`;
+    ? 'LANGUAGE REQUIREMENT: Start by asking the customer to choose between English or Arabic. After they choose, respond ONLY in their chosen language for the entire conversation.'
+    : `LANGUAGE REQUIREMENT: Start by asking the customer to choose between English or Arabic. After they choose, respond ONLY in their chosen language for the entire conversation. Default language preference: ${language}.`;
 
   const servicesText = services.length > 0
     ? services.map((s) => `- ${s.name}: ${formatPrice(s.price_min, s.price_max, s.price_type)}, ${s.duration_minutes} minutes`).join('\n')
@@ -130,7 +130,7 @@ export function buildSystemPrompt(
 
   const greetingInstruction = greetingMessage
     ? `OPENING GREETING: When the call starts, your very first response MUST be exactly: "${greetingMessage}"`
-    : `OPENING GREETING: When the call starts, greet the caller warmly with something like "Hello! Thank you for calling ${business.name}, how can I help you today?"`;
+    : `OPENING GREETING: When the call starts, greet the caller and ask them to choose a language. Example: "Hello! Thank you for calling ${business.name}. Which language would you prefer? English or Arabic?"`;
 
   return `${langInstruction}
 
@@ -155,7 +155,8 @@ ${hoursText}
 ${faqsText ? `FREQUENTLY ASKED QUESTIONS:\n${faqsText}` : ''}
 
 IMPORTANT RULES:
-- Always respond in English only — never switch languages
+- ALWAYS start by asking the customer to choose between English or Arabic
+- After language selection, speak ONLY in the customer's chosen language
 - Always collect customer name and phone before booking
 - Always use the available tools to check slots before confirming times
 - Never make up pricing - use the getServices tool for accurate pricing

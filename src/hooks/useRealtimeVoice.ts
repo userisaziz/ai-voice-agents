@@ -32,6 +32,7 @@ export function useRealtimeVoice({ businessId, agentId, onConversationEnd }: Use
 
   const connectionRef = useRef<DGConnection | null>(null);
   const socketOpenRef = useRef(false);
+  const settingsAppliedRef = useRef(false);
   const audioQueueRef = useRef<ArrayBuffer[]>([]);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const micContextRef = useRef<AudioContext | null>(null);
@@ -41,6 +42,13 @@ export function useRealtimeVoice({ businessId, agentId, onConversationEnd }: Use
   const startTimeRef = useRef<number | null>(null);
   const pendingSavesRef = useRef<Promise<unknown>[]>([]);
   const conversationIdRef = useRef<string | null>(null);
+  const keepAliveRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const sessionConfigRef = useRef<{ greeting: string; systemPrompt: string; ttsModel: string; language: string }>({
+    greeting: '',
+    systemPrompt: '',
+    ttsModel: '',
+    language: 'en',
+  });
 
   // ── Playback via AudioWorklet (ring buffer) ──────────────────────────────
   const setupPlaybackWorklet = useCallback(async (audioContext: AudioContext) => {
@@ -220,13 +228,88 @@ export function useRealtimeVoice({ businessId, agentId, onConversationEnd }: Use
         break;
       }
 
-      case 'Welcome':
-        console.log('[Deepgram] Welcome:', data);
-        break;
+      case 'Welcome': {
+        console.log('[Deepgram] Welcome received, sending settings');
+        const { greeting, systemPrompt, ttsModel, language } = sessionConfigRef.current;
+        const sttModel = process.env.NEXT_PUBLIC_DEEPGRAM_STT_MODEL || 'flux-general-en';
+        const fallbackTtsModel = ttsModel || process.env.NEXT_PUBLIC_DEEPGRAM_TTS_MODEL || 'aura-2-thalia-en';
 
-      case 'SettingsApplied':
-        console.log('[Deepgram] Settings applied');
+        // ElevenLabs primary + Deepgram Aura fallback
+        const elevenLabsApiKey = process.env.NEXT_PUBLIC_ELEVEN_LABS_API_KEY || '';
+        const elevenLabsVoiceId = process.env.NEXT_PUBLIC_ELEVEN_LABS_VOICE_ID || 'pNInz6obpgDQGcFmaJgB';
+        // Use multilingual model for Arabic/English support
+        const elevenLabsModel = process.env.NEXT_PUBLIC_ELEVEN_LABS_MODEL || 'eleven_multilingual_v2';
+
+        const speakConfig = elevenLabsApiKey
+          ? [
+              {
+                provider: {
+                  type: 'eleven_labs' as const,
+                  model_id: elevenLabsModel,
+                  // language_code is optional — ElevenLabs auto-detects from text
+                  // Explicit code improves quality for known languages
+                  language_code: language === 'ar' ? 'ar' : 'en',
+                },
+                endpoint: {
+                  url: `wss://api.elevenlabs.io/v1/text-to-speech/${elevenLabsVoiceId}/multi-stream-input`,
+                  headers: {
+                    'xi-api-key': elevenLabsApiKey,
+                  },
+                },
+              },
+              {
+                provider: {
+                  type: 'deepgram' as const,
+                  model: fallbackTtsModel,
+                },
+              },
+            ]
+          : { provider: { type: 'deepgram' as const, model: fallbackTtsModel } };
+
+        connection.sendSettings({
+          type: 'Settings',
+          audio: {
+            input: { encoding: 'linear16', sample_rate: 16000 },
+            output: { encoding: 'linear16', sample_rate: 24000, container: 'none' },
+          },
+          agent: {
+            listen: {
+              provider: {
+                type: 'deepgram',
+                version: 'v2' as const,
+                model: sttModel,
+              },
+            },
+            think: {
+              provider: { type: 'open_ai', model: 'gpt-4o-mini' },
+              prompt: systemPrompt,
+              functions: DEEPGRAM_FUNCTIONS,
+            },
+            speak: speakConfig,
+            greeting: greeting || 'Hello! How can I help you today?',
+          },
+        });
+
+        // Start KeepAlive to prevent server-side timeout
+        if (keepAliveRef.current) clearInterval(keepAliveRef.current);
+        keepAliveRef.current = setInterval(() => {
+          connection.sendKeepAlive({ type: 'KeepAlive' });
+        }, 5000);
         break;
+      }
+
+      case 'SettingsApplied': {
+        console.log('[Deepgram] Settings applied, ready for audio');
+        settingsAppliedRef.current = true;
+        // Flush any queued mic frames now that settings are confirmed
+        const queued = audioQueueRef.current;
+        audioQueueRef.current = [];
+        for (const buf of queued) {
+          connection.sendMedia(buf);
+        }
+        setConnectionState({ status: 'listening' });
+        break;
+      }
 
       case 'Error':
         console.error('[Deepgram] Error:', data);
@@ -238,7 +321,14 @@ export function useRealtimeVoice({ businessId, agentId, onConversationEnd }: Use
   // ── Cleanup (memoized so disconnect + useEffect hold a stable ref) ───────
   const cleanup = useCallback(() => {
     socketOpenRef.current = false;
+    settingsAppliedRef.current = false;
     audioQueueRef.current = [];
+
+    // Stop KeepAlive interval
+    if (keepAliveRef.current) {
+      clearInterval(keepAliveRef.current);
+      keepAliveRef.current = null;
+    }
 
     workletNodeRef.current?.disconnect();
     workletNodeRef.current = null;
@@ -283,7 +373,7 @@ export function useRealtimeVoice({ businessId, agentId, onConversationEnd }: Use
       });
       if (!res.ok) throw new Error('Failed to create session');
 
-      const { conversationId: convId, greeting, systemPrompt } = await res.json();
+      const { conversationId: convId, greeting, systemPrompt, ttsModel, language } = await res.json();
       conversationIdRef.current = convId;
       setConversationId(convId);
       startTimeRef.current = Date.now();
@@ -294,35 +384,30 @@ export function useRealtimeVoice({ businessId, agentId, onConversationEnd }: Use
       const apiKey = await keyRes.text();
 
       // Phase 3: SDK client and WebSocket connection
-      // NOTE: client.agent.v1.connect() creates the socket in "startClosed" state —
-      // the WebSocket is NOT opened until you explicitly call socket.connect().
-      const client = new DeepgramClient({ apiKey });
+      // Store session config for Welcome handler to use when sending settings
+      sessionConfigRef.current = { greeting, systemPrompt, ttsModel, language: language || 'en' };
+
+      // Regional endpoint configuration for lower latency (EU for MENA region)
+      // SDK constructs URL as: baseUrl + "/v1/agent/converse"
+      const region = process.env.NEXT_PUBLIC_DEEPGRAM_REGION || 'us';
+      const clientOptions: { apiKey: string; baseUrl?: string } = { apiKey };
+      
+      // Override base URL for regional endpoints
+      // US: wss://agent.deepgram.com/v1/agent/converse (default)
+      // EU: wss://api.eu.deepgram.com/v1/agent/converse
+      // AU: wss://api.au.deepgram.com/v1/agent/converse
+      if (region === 'eu') {
+        clientOptions.baseUrl = 'wss://api.eu.deepgram.com';
+      } else if (region === 'au') {
+        clientOptions.baseUrl = 'wss://api.au.deepgram.com';
+      }
+      
+      const client = new DeepgramClient(clientOptions);
       const connection = await client.agent.v1.connect({ Authorization: `Token ${apiKey}` });
       connectionRef.current = connection;
 
       // Phase 4: wire up SDK events BEFORE calling connect()
       connection.on('open', () => {
-        const sttModel = process.env.NEXT_PUBLIC_DEEPGRAM_STT_MODEL || 'nova-3';
-        const ttsModel = process.env.NEXT_PUBLIC_DEEPGRAM_TTS_MODEL || 'aura-2-thalia-en';
-
-        connection.sendSettings({
-          type: 'Settings',
-          audio: {
-            input: { encoding: 'linear16', sample_rate: 16000 },
-            output: { encoding: 'linear16', sample_rate: 24000, container: 'none' },
-          },
-          agent: {
-            listen: { provider: { version: 'v1', type: 'deepgram', model: sttModel } },
-            think: {
-              provider: { type: 'open_ai', model: 'gpt-4o-mini' },
-              prompt: systemPrompt,
-              functions: DEEPGRAM_FUNCTIONS,
-            },
-            speak: { provider: { type: 'deepgram', model: ttsModel } },
-            greeting: greeting || 'Hello! How can I help you today?',
-          },
-        });
-
         // Mark socket open and flush any queued mic frames
         socketOpenRef.current = true;
         const queued = audioQueueRef.current;
@@ -352,6 +437,7 @@ export function useRealtimeVoice({ businessId, agentId, onConversationEnd }: Use
 
       // Phase 4b: Actually open the WebSocket (socket starts in "closed" state)
       connection.connect();
+      await connection.waitForOpen();
 
       // Phase 5: mic capture → AudioWorklet → SDK send
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -373,10 +459,10 @@ export function useRealtimeVoice({ businessId, agentId, onConversationEnd }: Use
 
       await setupPlaybackWorklet(playbackContext);
       await setupMicWorklet(micContext, stream, (buffer) => {
-        if (socketOpenRef.current) {
+        if (settingsAppliedRef.current) {
           connection.sendMedia(buffer);
         } else {
-          // Queue frames until socket opens (prevents "Socket is not open" crash)
+          // Queue frames until SettingsApplied (prevents "binary before settings" error)
           audioQueueRef.current.push(buffer);
         }
       });

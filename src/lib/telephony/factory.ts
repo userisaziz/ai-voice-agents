@@ -1,7 +1,9 @@
-import type { TelephonyProvider, TelephonyCredentials, TwilioCredentials, VapiCredentials, VobizCredentials } from '@/types';
+import type { TelephonyProvider, TelephonyCredentials, TwilioCredentials, VapiCredentials, VobizCredentials, SipCredentials } from '@/types';
 import type { TelephonyProviderInterface } from './types';
 import { TwilioProvider } from './twilio';
 import { VapiProvider } from './vapi';
+import { VobizProvider } from './vobiz';
+import { SipProvider } from './sip';
 
 export class UnsupportedProviderError extends Error {
   constructor(providerType: string) {
@@ -11,12 +13,13 @@ export class UnsupportedProviderError extends Error {
 }
 
 export function createTelephonyProvider(provider: TelephonyProvider): TelephonyProviderInterface {
-  return createProviderFromType(provider.provider_type, provider.credentials);
+  return createProviderFromType(provider.provider_type, provider.credentials, provider.webhook_url || undefined);
 }
 
 export function createProviderFromType(
   providerType: string,
-  credentials: TelephonyCredentials
+  credentials: TelephonyCredentials,
+  apiBaseUrl?: string
 ): TelephonyProviderInterface {
   switch (providerType) {
     case 'twilio':
@@ -24,8 +27,9 @@ export function createProviderFromType(
     case 'vapi':
       return new VapiProvider(credentials as VapiCredentials);
     case 'vobiz':
-      // Vobiz uses a similar API pattern to Vapi, fallback to Vapi for now
-      return new VapiProvider(credentials as VobizCredentials as unknown as VapiCredentials);
+      return new VobizProvider(credentials as VobizCredentials);
+    case 'sip':
+      return new SipProvider(credentials as SipCredentials, apiBaseUrl);
     default:
       throw new UnsupportedProviderError(providerType);
   }
@@ -36,11 +40,15 @@ export function isTwilioCredentials(creds: TelephonyCredentials): creds is Twili
 }
 
 export function isVapiCredentials(creds: TelephonyCredentials): creds is VapiCredentials {
-  return 'apiKey' in creds && !('userId' in creds);
+  return 'apiKey' in creds && !('userId' in creds) && !('sipTrunkId' in creds);
 }
 
 export function isVobizCredentials(creds: TelephonyCredentials): creds is VobizCredentials {
-  return 'apiKey' in creds && 'userId' in creds;
+  return 'apiKey' in creds && 'sipTrunkId' in creds;
+}
+
+export function isSipCredentials(creds: TelephonyCredentials): creds is SipCredentials {
+  return !('apiKey' in creds) && 'sipTrunkId' in creds;
 }
 
 export function validateCredentialsFormat(
@@ -70,6 +78,40 @@ export function validateCredentialsFormat(
         const creds = credentials as VobizCredentials;
         if (!creds.apiKey) {
           return { valid: false, error: 'Vobiz requires apiKey' };
+        }
+        if (!creds.sipTrunkId) {
+          return { valid: false, error: 'Vobiz requires SIP Trunk ID' };
+        }
+        if (!creds.sipDomain) {
+          return { valid: false, error: 'Vobiz requires SIP Domain' };
+        }
+        if (!creds.sipUsername || !creds.sipPassword) {
+          return { valid: false, error: 'Vobiz requires SIP credentials' };
+        }
+        if (!creds.outboundNumber) {
+          return { valid: false, error: 'Vobiz requires outbound number' };
+        }
+        if (!creds.defaultTransferNumber) {
+          return { valid: false, error: 'Vobiz requires default transfer number' };
+        }
+        return { valid: true };
+      }
+      case 'sip': {
+        const creds = credentials as SipCredentials;
+        if (!creds.sipTrunkId) {
+          return { valid: false, error: 'SIP Trunk ID is required' };
+        }
+        if (!creds.sipDomain) {
+          return { valid: false, error: 'SIP Domain is required' };
+        }
+        if (!creds.sipUsername || !creds.sipPassword) {
+          return { valid: false, error: 'SIP credentials (username/password) are required' };
+        }
+        if (!creds.outboundNumber) {
+          return { valid: false, error: 'Outbound number is required' };
+        }
+        if (!creds.defaultTransferNumber) {
+          return { valid: false, error: 'Default transfer number is required' };
         }
         return { valid: true };
       }

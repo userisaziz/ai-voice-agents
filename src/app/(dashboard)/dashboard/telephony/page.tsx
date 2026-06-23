@@ -502,6 +502,7 @@ export default function TelephonyPage() {
                 onAdd={handleAddPhone}
                 onUpdate={handleUpdatePhone}
                 onDelete={handleDeletePhone}
+                onAddProvider={() => { setEditingProvider(null); setProviderModalOpen(true); }}
               />
             </Card>
           )}
@@ -541,6 +542,7 @@ export default function TelephonyPage() {
           agents={agents}
           onSubmit={handleInboundSubmit}
           onCancel={() => { setInboundModalOpen(false); setEditingInbound(null); }}
+          onGoToPhoneNumbers={() => { setInboundModalOpen(false); setEditingInbound(null); setActiveTab('numbers'); }}
         />
       </Modal>
 
@@ -553,6 +555,7 @@ export default function TelephonyPage() {
           agents={agents}
           onSubmit={handleCampaignSubmit}
           onCancel={() => { setCampaignModalOpen(false); setEditingCampaign(null); }}
+          onGoToPhoneNumbers={() => { setCampaignModalOpen(false); setEditingCampaign(null); setActiveTab('numbers'); }}
         />
       </Modal>
 

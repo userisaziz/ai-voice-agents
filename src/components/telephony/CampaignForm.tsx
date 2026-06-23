@@ -2,6 +2,7 @@
 
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
+import { Phone, ArrowRight } from 'lucide-react';
 import { outboundCampaignSchema, type OutboundCampaignFormData } from '@/validations';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
@@ -17,9 +18,15 @@ interface CampaignFormProps {
   agents: Agent[];
   onSubmit: (data: OutboundCampaignFormData) => Promise<void>;
   onCancel: () => void;
+  /** Called when user needs to navigate to Phone Numbers tab */
+  onGoToPhoneNumbers?: () => void;
 }
 
-export function CampaignForm({ campaign, phoneNumbers, agents, onSubmit, onCancel }: CampaignFormProps) {
+export function CampaignForm({ campaign, phoneNumbers, agents, onSubmit, onCancel, onGoToPhoneNumbers }: CampaignFormProps) {
+  // Filter to outbound-capable numbers only
+  const outboundNumbers = phoneNumbers.filter(p => p.direction !== 'inbound');
+  const hasOutboundNumbers = outboundNumbers.length > 0;
+
   const { register, handleSubmit, watch, setValue, formState: { errors, isSubmitting } } = useForm<OutboundCampaignFormData>({
     resolver: zodResolver(outboundCampaignSchema),
     defaultValues: campaign ? {
@@ -44,6 +51,38 @@ export function CampaignForm({ campaign, phoneNumbers, agents, onSubmit, onCance
     },
   });
 
+  // If no outbound phone numbers and not editing, show guidance
+  if (!hasOutboundNumbers && !campaign) {
+    return (
+      <div className="space-y-4">
+        <div className="p-4 rounded-xl" style={{ background: 'rgba(251,191,36,0.06)', border: '1px solid rgba(251,191,36,0.15)' }}>
+          <div className="flex items-start gap-3">
+            <Phone className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: '#fbbf24' }} />
+            <div>
+              <div className="text-[13px] font-semibold" style={{ color: '#fbbf24' }}>No outbound phone numbers available</div>
+              <div className="text-[12px] mt-1" style={{ color: '#92803a' }}>
+                You need to add a phone number with <strong>outbound</strong> or <strong>both</strong> direction before creating a campaign. Go to the <strong>Phone Numbers</strong> tab to set one up.
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex justify-between pt-2">
+          <Button type="button" variant="secondary" onClick={onCancel}>Cancel</Button>
+          {onGoToPhoneNumbers && (
+            <Button
+              type="button"
+              icon={<ArrowRight className="w-4 h-4" />}
+              onClick={onGoToPhoneNumbers}
+            >
+              Go to Phone Numbers
+            </Button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
       <Input
@@ -65,7 +104,7 @@ export function CampaignForm({ campaign, phoneNumbers, agents, onSubmit, onCance
         <Select
           label="Caller Number"
           placeholder="Select a phone number"
-          options={phoneNumbers.filter(p => p.direction !== 'inbound').map(p => ({
+          options={outboundNumbers.map(p => ({
             value: p.id,
             label: `${p.number}${p.friendly_name ? ` (${p.friendly_name})` : ''}`,
           }))}
