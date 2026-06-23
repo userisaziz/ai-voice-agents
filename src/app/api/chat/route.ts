@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminSupabase } from '@/lib/supabase/admin';
+import { searchProducts, getCategories, getTopSellers } from '@/services/marsa-tijarah';
 
 export async function OPTIONS() {
   return new NextResponse(null, {
@@ -13,8 +14,97 @@ export async function OPTIONS() {
 }
 
 interface ChatMessage {
-  role: 'user' | 'assistant' | 'system';
+  role: 'user' | 'assistant' | 'system' | 'tool';
   content: string;
+  tool_call_id?: string;
+  tool_calls?: Array<{
+    id: string;
+    type: 'function';
+    function: { name: string; arguments: string };
+  }>;
+}
+
+// ── Tool definitions for DeepSeek function calling ─────────────────────
+const CHAT_TOOLS = [
+  {
+    type: 'function' as const,
+    function: {
+      name: 'searchProducts',
+      description: 'Search for products in the marketplace by keyword, category, or price range. Returns approved products with pricing and supplier information.',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'Search keyword for products (e.g., "steel", "cement", "copper wire")' },
+          category: { type: 'string', description: 'Filter by category name (optional)' },
+          min_price: { type: 'number', description: 'Minimum price filter (optional)' },
+          max_price: { type: 'number', description: 'Maximum price filter (optional)' },
+          limit: { type: 'number', description: 'Max results to return, default 10 (optional)' },
+        },
+        required: ['query'],
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'getCategories',
+      description: 'Get all available product categories in the marketplace',
+      parameters: {
+        type: 'object',
+        properties: {},
+        required: [],
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'getTopSellers',
+      description: 'Get top-rated premium sellers from the marketplace, optionally filtered by category',
+      parameters: {
+        type: 'object',
+        properties: {
+          category: { type: 'string', description: 'Filter sellers by category (optional)' },
+          limit: { type: 'number', description: 'Max results to return, default 5 (optional)' },
+        },
+        required: [],
+      },
+    },
+  },
+];
+
+// ── Execute a tool call and return the result as a string ──────────────
+async function executeToolCall(name: string, args: Record<string, unknown>): Promise<string> {
+  try {
+    switch (name) {
+      case 'searchProducts': {
+        const result = await searchProducts({
+          query: (args.query as string) || '',
+          category: args.category as string | undefined,
+          min_price: args.min_price as number | undefined,
+          max_price: args.max_price as number | undefined,
+          limit: (args.limit as number) || 10,
+        });
+        return JSON.stringify(result);
+      }
+      case 'getCategories': {
+        const result = await getCategories();
+        return JSON.stringify(result);
+      }
+      case 'getTopSellers': {
+        const result = await getTopSellers({
+          category: args.category as string | undefined,
+          limit: (args.limit as number) || 5,
+        });
+        return JSON.stringify(result);
+      }
+      default:
+        return JSON.stringify({ error: `Unknown tool: ${name}` });
+    }
+  } catch (err) {
+    console.error(`[Chat API] Tool execution error (${name}):`, err);
+    return JSON.stringify({ error: 'Tool execution failed' });
+  }
 }
 
 export async function POST(req: NextRequest) {
@@ -70,7 +160,7 @@ export async function POST(req: NextRequest) {
 
     // Build system prompt
     const basePrompt = agent?.system_prompt || `You are a helpful AI assistant for ${business.name}. Answer questions clearly and concisely. Be friendly and professional.`;
-    const contextPrompt = `${basePrompt}\n\nBusiness: ${business.name}${business.city ? ', ' + business.city : ''}${business.state ? ', ' + business.state : ''}\nYou are chatting via the website chat widget. Keep responses concise (2-3 sentences max). Use a conversational tone.`;
+    const contextPrompt = `${basePrompt}\n\nBusiness: ${business.name}${business.city ? ', ' + business.city : ''}${business.state ? ', ' + business.state : ''}\nYou are chatting via the website chat widget. Keep responses concise (2-3 sentences max). Use a conversational tone.\n\nYou have access to marketplace tools: use searchProducts to find products, getCategories to browse categories, and getTopSellers to find top sellers. When presenting product results, format them nicely with name, price, and supplier info.`;
 
     // Build message history for DeepSeek
     const messages: ChatMessage[] = [
@@ -113,34 +203,76 @@ export async function POST(req: NextRequest) {
       content: message,
     });
 
-    // Call DeepSeek API
+    // Call DeepSeek API with tool-calling loop
     const deepseekApiKey = process.env.DEEPSEEK_API_KEY;
     if (!deepseekApiKey) {
       return NextResponse.json({ error: 'DeepSeek API key not configured' }, { status: 500 });
     }
 
-    const deepseekRes = await fetch('https://api.deepseek.com/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${deepseekApiKey}`,
-      },
-      body: JSON.stringify({
-        model: 'deepseek-chat',
-        messages,
-        max_tokens: 300,
-        temperature: 0.7,
-      }),
-    });
+    const deepseekHeaders = {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${deepseekApiKey}`,
+    };
 
-    if (!deepseekRes.ok) {
-      const errText = await deepseekRes.text();
-      console.error('[Chat API] DeepSeek error:', errText);
-      return NextResponse.json({ error: 'LLM request failed', conversationId: convId }, { status: 502 });
+    let reply = "I'm sorry, I couldn't process that. Please try again.";
+    const MAX_TOOL_ROUNDS = 4;
+
+    for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+      const deepseekRes = await fetch('https://api.deepseek.com/chat/completions', {
+        method: 'POST',
+        headers: deepseekHeaders,
+        body: JSON.stringify({
+          model: 'deepseek-chat',
+          messages,
+          tools: CHAT_TOOLS,
+          max_tokens: 500,
+          temperature: 0.7,
+        }),
+      });
+
+      if (!deepseekRes.ok) {
+        const errText = await deepseekRes.text();
+        console.error('[Chat API] DeepSeek error:', errText);
+        return NextResponse.json({ error: 'LLM request failed', conversationId: convId }, { status: 502 });
+      }
+
+      const data = await deepseekRes.json();
+      const choice = data.choices?.[0]?.message;
+
+      if (!choice) break;
+
+      // If no tool calls, we have the final reply
+      if (!choice.tool_calls || choice.tool_calls.length === 0) {
+        reply = choice.content || reply;
+        break;
+      }
+
+      // Add assistant message with tool calls to history
+      messages.push({
+        role: 'assistant',
+        content: choice.content || '',
+        tool_calls: choice.tool_calls,
+      });
+
+      // Execute each tool call and add results
+      for (const toolCall of choice.tool_calls) {
+        let args: Record<string, unknown> = {};
+        try {
+          args = JSON.parse(toolCall.function.arguments || '{}');
+        } catch {
+          args = {};
+        }
+
+        const result = await executeToolCall(toolCall.function.name, args);
+
+        messages.push({
+          role: 'tool',
+          content: result,
+          tool_call_id: toolCall.id,
+        });
+      }
+      // Loop continues — DeepSeek will generate a response using tool results
     }
-
-    const deepseekData = await deepseekRes.json();
-    const reply = deepseekData.choices?.[0]?.message?.content || "I'm sorry, I couldn't process that. Please try again.";
 
     // Save assistant message to DB
     await supabase.from('conversation_messages').insert({
