@@ -26,6 +26,12 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: 'businessId is required' }, { status: 400 });
       }
 
+      // Validate Deepgram API key is configured
+      if (!process.env.DEEPGRAM_API_KEY) {
+        console.error('[session] DEEPGRAM_API_KEY not configured');
+        return NextResponse.json({ error: 'Deepgram API key not configured' }, { status: 500 });
+      }
+
       const supabase = createAdminSupabase();
 
       const { data: business } = await supabase
@@ -101,22 +107,16 @@ export async function POST(req: NextRequest) {
       const greeting = agentTyped?.greeting_message
         || `Hello! Thank you for calling ${business.name}, how can I help you today?`;
 
-      // LLM endpoint config for custom/self-hosted providers
-      const llmProviderType = process.env.DEEPGRAM_LLM_PROVIDER_TYPE || 'open_ai';
-      const llmEndpointUrl = process.env.DEEPGRAM_LLM_ENDPOINT_URL || null;
-
       return NextResponse.json({
         conversationId: conversation?.id,
         agentName: agentTyped?.name || 'AI Receptionist',
         voice: agentTyped?.voice || 'alloy',
+        language: agentTyped?.language || 'en',
         model: 'deepgram-voice-agent',
         systemPrompt,
         tools: REALTIME_TOOLS,       // OpenAI format (legacy)
         functions: DEEPGRAM_FUNCTIONS, // Deepgram format
         greeting,
-        // LLM config passed to client for Deepgram Settings message
-        llmProviderType,
-        llmEndpoint: llmEndpointUrl || null,
         turnDetection: {
           type: 'server_vad',
           threshold: sensitivity === 'low' ? 0.9 : sensitivity === 'high' ? 0.5 : 0.7,

@@ -11,6 +11,7 @@
     "clear": "rm -rf node_modules package-lock.json .next"
   },
   "dependencies": {
+    "@deepgram/agents": "^0.1.1",
     "@deepgram/sdk": "^5.4.0",
     "@hookform/resolvers": "^3.10.0",
     "@supabase/ssr": "^0.5.2",

@@ -1,39 +1,27 @@
 'use client';
 
 import { useRef, useCallback, useEffect } from 'react';
+import { DeepgramClient } from '@deepgram/sdk';
 import { useVoiceStore } from '@/store/voice';
-import type { TranscriptEntry } from '@/types';
 import { DEEPGRAM_FUNCTIONS } from '@/ai/tools';
 
 interface UseRealtimeVoiceOptions {
   businessId: string;
+  agentId?: string;
   onConversationEnd?: (conversationId: string) => void;
 }
 
-type DeepgramSettings = {
-  type: 'Settings';
-  audio: {
-    input: { encoding: string; sample_rate: number };
-    output: { encoding: string; sample_rate: number; container: string };
-  };
-  agent: {
-    listen: { provider: { type: string; model: string } };
-    think: {
-      provider: { type: string; model: string };
-      prompt: string;
-      functions: typeof DEEPGRAM_FUNCTIONS;
-      endpoint?: { url: string; headers: Record<string, string> };
-    };
-    speak: { provider: { type: string; model: string } };
-    greeting?: string;
-  };
-};
+type DGConnection = Awaited<ReturnType<InstanceType<typeof DeepgramClient>['agent']['v1']['connect']>>;
 
-export function useRealtimeVoice({ businessId, onConversationEnd }: UseRealtimeVoiceOptions) {
+interface MessageTypes {
+  type: string;
+  [key: string]: unknown;
+}
+
+export function useRealtimeVoice({ businessId, agentId, onConversationEnd }: UseRealtimeVoiceOptions) {
   const {
     setConnectionState,
     addTranscriptEntry,
-    updateLastEntry,
     clearTranscript,
     setConversationId,
     setMuted,
@@ -42,53 +30,244 @@ export function useRealtimeVoice({ businessId, onConversationEnd }: UseRealtimeV
     conversationId,
   } = useVoiceStore();
 
-  const wsRef = useRef<WebSocket | null>(null);
+  const connectionRef = useRef<DGConnection | null>(null);
+  const socketOpenRef = useRef(false);
+  const audioQueueRef = useRef<ArrayBuffer[]>([]);
   const mediaStreamRef = useRef<MediaStream | null>(null);
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const processorRef = useRef<ScriptProcessorNode | null>(null);
+  const micContextRef = useRef<AudioContext | null>(null);
+  const playbackContextRef = useRef<AudioContext | null>(null);
+  const workletNodeRef = useRef<AudioWorkletNode | null>(null);
+  const playbackNodeRef = useRef<AudioWorkletNode | null>(null);
   const startTimeRef = useRef<number | null>(null);
-  const assistantMsgIdRef = useRef<string | null>(null);
   const pendingSavesRef = useRef<Promise<unknown>[]>([]);
-  const audioChunksRef = useRef<Uint8Array[]>([]);
-  const audioQueueRef = useRef<Uint8Array[]>([]);
-  const isPlayingRef = useRef(false);
-  const audioElementRef = useRef<HTMLAudioElement | null>(null);
+  const conversationIdRef = useRef<string | null>(null);
 
-  const playAudioChunk = useCallback((chunk: Uint8Array) => {
-    audioQueueRef.current.push(chunk);
-    if (!isPlayingRef.current) {
-      playNextChunk();
-    }
+  // ── Playback via AudioWorklet (ring buffer) ──────────────────────────────
+  const setupPlaybackWorklet = useCallback(async (audioContext: AudioContext) => {
+    const workletCode = `
+      class PlaybackProcessor extends AudioWorkletProcessor {
+        constructor() {
+          super();
+          this._buffer = new Float32Array(0);
+          this.port.onmessage = (e) => {
+            if (e.data?.type === 'flush') {
+              this._buffer = new Float32Array(0);
+              return;
+            }
+            const incoming = new Int16Array(e.data);
+            const f32 = new Float32Array(incoming.length);
+            for (let i = 0; i < incoming.length; i++) {
+              f32[i] = incoming[i] / 32768;
+            }
+            const merged = new Float32Array(this._buffer.length + f32.length);
+            merged.set(this._buffer);
+            merged.set(f32, this._buffer.length);
+            this._buffer = merged;
+          };
+        }
+        process(_, outputs) {
+          const out = outputs[0][0];
+          if (!out) return true;
+          if (this._buffer.length >= out.length) {
+            out.set(this._buffer.subarray(0, out.length));
+            this._buffer = this._buffer.subarray(out.length);
+          }
+          return true;
+        }
+      }
+      registerProcessor('playback-processor', PlaybackProcessor);
+    `;
+    const blob = new Blob([workletCode], { type: 'application/javascript' });
+    const url = URL.createObjectURL(blob);
+    await audioContext.audioWorklet.addModule(url);
+    URL.revokeObjectURL(url);
+
+    const node = new AudioWorkletNode(audioContext, 'playback-processor');
+    node.connect(audioContext.destination);
+    playbackNodeRef.current = node;
   }, []);
 
-  const playNextChunk = useCallback(() => {
-    if (audioQueueRef.current.length === 0) {
-      isPlayingRef.current = false;
+  // ── Mic capture via AudioWorklet ─────────────────────────────────────────
+  const setupMicWorklet = useCallback(async (
+    audioContext: AudioContext,
+    stream: MediaStream,
+    onPcmChunk: (buffer: ArrayBuffer) => void,
+  ) => {
+    const workletCode = `
+      class MicProcessor extends AudioWorkletProcessor {
+        process(inputs) {
+          const input = inputs[0]?.[0];
+          if (!input) return true;
+          const pcm = new Int16Array(input.length);
+          for (let i = 0; i < input.length; i++) {
+            const s = Math.max(-1, Math.min(1, input[i]));
+            pcm[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+          }
+          this.port.postMessage(pcm.buffer, [pcm.buffer]);
+          return true;
+        }
+      }
+      registerProcessor('mic-processor', MicProcessor);
+    `;
+    const blob = new Blob([workletCode], { type: 'application/javascript' });
+    const url = URL.createObjectURL(blob);
+    await audioContext.audioWorklet.addModule(url);
+    URL.revokeObjectURL(url);
+
+    const source = audioContext.createMediaStreamSource(stream);
+    const node = new AudioWorkletNode(audioContext, 'mic-processor');
+    node.port.onmessage = (e: MessageEvent<ArrayBuffer>) => onPcmChunk(e.data);
+    source.connect(node);
+    workletNodeRef.current = node;
+  }, []);
+
+  // ── Save a message turn to your backend ─────────────────────────────────
+  const saveMessage = useCallback((convId: string, role: 'user' | 'assistant', content: string) => {
+    const p = fetch('/api/conversations', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ conversationId: convId, role, content }),
+    }).catch(console.error);
+    pendingSavesRef.current.push(p);
+  }, []);
+
+  // ── Message type dispatcher ──────────────────────────────────────────────
+  const handleMessage = useCallback((connection: DGConnection, convId: string, msg: unknown) => {
+    // Binary audio data (ArrayBuffer or Blob)
+    if (msg instanceof ArrayBuffer) {
+      const ab = msg;
+      // Skip WAV header (44 bytes) if present, otherwise use raw PCM
+      const header = new Uint8Array(ab, 0, 4);
+      const isWav = header[0] === 0x52 && header[1] === 0x49 && header[2] === 0x46 && header[3] === 0x46; // 'RIFF'
+      const pcm = isWav ? ab.slice(44) : ab;
+      playbackNodeRef.current?.port.postMessage(pcm, [pcm]);
       return;
     }
-    isPlayingRef.current = true;
-    const chunk = audioQueueRef.current.shift()!;
-    const blob = new Blob([chunk.buffer as ArrayBuffer], { type: 'audio/wav' });
-    const url = URL.createObjectURL(blob);
 
-    if (!audioElementRef.current) {
-      audioElementRef.current = new Audio();
+    if (msg instanceof Blob) {
+      msg.arrayBuffer().then((ab) => {
+        const header = new Uint8Array(ab, 0, 4);
+        const isWav = header[0] === 0x52 && header[1] === 0x49 && header[2] === 0x46 && header[3] === 0x46;
+        const pcm = isWav ? ab.slice(44) : ab;
+        playbackNodeRef.current?.port.postMessage(pcm, [pcm]);
+      });
+      return;
     }
-    const audio = audioElementRef.current;
-    audio.src = url;
-    audio.onended = () => {
-      URL.revokeObjectURL(url);
-      playNextChunk();
-    };
-    audio.onerror = () => {
-      URL.revokeObjectURL(url);
-      isPlayingRef.current = false;
-    };
-    audio.play().catch(() => {
-      isPlayingRef.current = false;
-    });
+
+    if (typeof msg === 'string') return;
+
+    const data = msg as MessageTypes;
+    switch (data.type) {
+      case 'AgentStartedSpeaking':
+        setConnectionState({ status: 'speaking' });
+        break;
+
+      case 'UserStartedSpeaking':
+        setConnectionState({ status: 'listening' });
+        playbackNodeRef.current?.port.postMessage({ type: 'flush' });
+        break;
+
+      case 'AgentAudioDone':
+        setConnectionState({ status: 'listening' });
+        break;
+
+      case 'ConversationText': {
+        const ct = data as unknown as { role: string; content: string };
+        const { role, content } = ct;
+        if (!content?.trim()) return;
+        const entry = {
+          id: `${role}-${Date.now()}`,
+          role: role as 'user' | 'assistant',
+          content,
+          timestamp: Date.now(),
+        };
+        addTranscriptEntry(entry);
+        if (convId) saveMessage(convId, role as 'user' | 'assistant', content);
+        break;
+      }
+
+      case 'FunctionCallRequest': {
+        const fn = data as unknown as { function_name: string; input: Record<string, unknown>; function_call_id: string };
+        (async () => {
+          try {
+            const toolRes = await fetch('/api/realtime/tools', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                toolName: fn.function_name,
+                toolArgs: fn.input,
+                businessId,
+                conversationId: convId,
+              }),
+            });
+            const { result } = await toolRes.json();
+            connection.sendFunctionCallResponse({
+              type: 'FunctionCallResponse',
+              id: fn.function_call_id,
+              name: fn.function_name,
+              content: JSON.stringify(result),
+            });
+          } catch (err) {
+            console.error('Function call failed:', err);
+            connection.sendFunctionCallResponse({
+              type: 'FunctionCallResponse',
+              id: fn.function_call_id,
+              name: fn.function_name,
+              content: JSON.stringify({ error: 'Function call failed' }),
+            });
+          }
+        })();
+        break;
+      }
+
+      case 'Welcome':
+        console.log('[Deepgram] Welcome:', data);
+        break;
+
+      case 'SettingsApplied':
+        console.log('[Deepgram] Settings applied');
+        break;
+
+      case 'Error':
+        console.error('[Deepgram] Error:', data);
+        setConnectionState({ status: 'error', error: (data as { message?: string })?.message || 'Unknown error' });
+        break;
+    }
+  }, [businessId, setConnectionState, addTranscriptEntry, saveMessage]);
+
+  // ── Cleanup (memoized so disconnect + useEffect hold a stable ref) ───────
+  const cleanup = useCallback(() => {
+    socketOpenRef.current = false;
+    audioQueueRef.current = [];
+
+    workletNodeRef.current?.disconnect();
+    workletNodeRef.current = null;
+
+    playbackNodeRef.current?.port.postMessage({ type: 'flush' });
+    playbackNodeRef.current?.disconnect();
+    playbackNodeRef.current = null;
+
+    mediaStreamRef.current?.getTracks().forEach((t) => t.stop());
+    mediaStreamRef.current = null;
+
+    if (micContextRef.current?.state !== 'closed') {
+      micContextRef.current?.close().catch(() => {});
+    }
+    micContextRef.current = null;
+
+    if (playbackContextRef.current?.state !== 'closed') {
+      playbackContextRef.current?.close().catch(() => {});
+    }
+    playbackContextRef.current = null;
+
+    connectionRef.current?.close();
+    connectionRef.current = null;
+
+    startTimeRef.current = null;
+    conversationIdRef.current = null;
   }, []);
 
+  // ── Main connect ─────────────────────────────────────────────────────────
   const connect = useCallback(async () => {
     if (connectionState.status !== 'idle' && connectionState.status !== 'error') return;
 
@@ -96,218 +275,85 @@ export function useRealtimeVoice({ businessId, onConversationEnd }: UseRealtimeV
     clearTranscript();
 
     try {
-      // Phase 1: Get session config from backend (system prompt, tools, conversation ID)
+      // Phase 1: session config from your backend
       const res = await fetch('/api/realtime/session', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ businessId }),
+        body: JSON.stringify({ businessId, agentId }),
       });
-
       if (!res.ok) throw new Error('Failed to create session');
 
-      const sessionData = await res.json();
-      const { conversationId: convId, greeting, systemPrompt, agentName } = sessionData;
-
+      const { conversationId: convId, greeting, systemPrompt } = await res.json();
+      conversationIdRef.current = convId;
       setConversationId(convId);
       startTimeRef.current = Date.now();
 
-      // Phase 2: Get Deepgram auth token (short-lived, browser-safe)
-      const tokenRes = await fetch('/api/deepgram-token');
-      if (!tokenRes.ok) throw new Error('Failed to get Deepgram token');
-      const token = await tokenRes.text();
+      // Phase 2: API key from backend proxy
+      const keyRes = await fetch('/api/deepgram-token');
+      if (!keyRes.ok) throw new Error('Failed to get Deepgram token');
+      const apiKey = await keyRes.text();
 
-      // Phase 3: Open WebSocket to Deepgram Voice Agent
-      const wsUrl = `wss://api.deepgram.com/v1/agent/converse`;
-      const ws = new WebSocket(wsUrl, ['token', token]);
-      wsRef.current = ws;
+      // Phase 3: SDK client and WebSocket connection
+      // NOTE: client.agent.v1.connect() creates the socket in "startClosed" state —
+      // the WebSocket is NOT opened until you explicitly call socket.connect().
+      const client = new DeepgramClient({ apiKey });
+      const connection = await client.agent.v1.connect({ Authorization: `Token ${apiKey}` });
+      connectionRef.current = connection;
 
-      ws.onopen = () => {
-        // Send Settings message to configure the agent
+      // Phase 4: wire up SDK events BEFORE calling connect()
+      connection.on('open', () => {
         const sttModel = process.env.NEXT_PUBLIC_DEEPGRAM_STT_MODEL || 'nova-3';
         const ttsModel = process.env.NEXT_PUBLIC_DEEPGRAM_TTS_MODEL || 'aura-2-thalia-en';
-        // Use server-provided LLM config (includes endpoint URL for custom providers)
-        const llmProviderType = sessionData.llmProviderType
-          || process.env.NEXT_PUBLIC_DEEPGRAM_LLM_PROVIDER_TYPE
-          || 'open_ai';
-        const llmModel = process.env.NEXT_PUBLIC_DEEPGRAM_LLM_MODEL || 'gpt-4o-mini';
 
-        // Build think config — supports open_ai, deepseek, or custom endpoint
-        const thinkConfig: DeepgramSettings['agent']['think'] = {
-          provider: { type: llmProviderType, model: llmModel },
-          prompt: systemPrompt,
-          functions: DEEPGRAM_FUNCTIONS,
-        };
-
-        // For custom/self-hosted LLMs, Deepgram calls your endpoint server-to-server
-        if (llmProviderType === 'custom' && sessionData.llmEndpoint) {
-          thinkConfig.endpoint = {
-            url: sessionData.llmEndpoint,
-            headers: { 'Content-Type': 'application/json' },
-          };
-        }
-
-        const settings: DeepgramSettings = {
+        connection.sendSettings({
           type: 'Settings',
           audio: {
             input: { encoding: 'linear16', sample_rate: 16000 },
-            output: { encoding: 'linear16', sample_rate: 16000, container: 'wav' },
+            output: { encoding: 'linear16', sample_rate: 24000, container: 'none' },
           },
           agent: {
-            listen: {
-              provider: { type: 'deepgram', model: sttModel },
+            listen: { provider: { version: 'v1', type: 'deepgram', model: sttModel } },
+            think: {
+              provider: { type: 'open_ai', model: 'gpt-4o-mini' },
+              prompt: systemPrompt,
+              functions: DEEPGRAM_FUNCTIONS,
             },
-            think: thinkConfig,
-            speak: {
-              provider: { type: 'deepgram', model: ttsModel },
-            },
-            greeting: greeting || `Hello! How can I help you today?`,
+            speak: { provider: { type: 'deepgram', model: ttsModel } },
+            greeting: greeting || 'Hello! How can I help you today?',
           },
-        };
+        });
 
-        ws.send(JSON.stringify(settings));
+        // Mark socket open and flush any queued mic frames
+        socketOpenRef.current = true;
+        const queued = audioQueueRef.current;
+        audioQueueRef.current = [];
+        for (const buf of queued) {
+          connection.sendMedia(buf);
+        }
+
         setConnectionState({ status: 'listening' });
-      };
+      });
 
-      ws.onmessage = async (event) => {
-        // Binary messages are audio chunks from the agent
-        if (event.data instanceof Blob) {
-          const arrayBuffer = await event.data.arrayBuffer();
-          playAudioChunk(new Uint8Array(arrayBuffer));
-          return;
-        }
+      // Single message handler — dispatch by type
+      connection.on('message', (msg) => {
+        handleMessage(connection, convId, msg);
+      });
 
-        // JSON messages are events
-        let data: Record<string, unknown>;
-        try {
-          data = JSON.parse(event.data);
-        } catch {
-          return;
-        }
+      connection.on('error', (err: Error) => {
+        console.error('[Deepgram SDK] Error:', err);
+        setConnectionState({ status: 'error', error: err.message });
+      });
 
-        const type = data.type as string;
-
-        // ── Agent started speaking ─────────────────────────────────────────
-        if (type === 'AgentStartedSpeaking') {
-          setConnectionState({ status: 'speaking' });
-        }
-
-        // ── User started speaking (for interruption) ─────────────────────
-        if (type === 'UserStartedSpeaking') {
-          setConnectionState({ status: 'listening' });
-          // Stop audio playback on interruption
-          if (audioElementRef.current) {
-            audioElementRef.current.pause();
-            audioElementRef.current.currentTime = 0;
-          }
-          audioQueueRef.current = [];
-          isPlayingRef.current = false;
-        }
-
-        // ── Conversation transcript ───────────────────────────────────────
-        if (type === 'ConversationText') {
-          const role = data.role as string;
-          const content = data.content as string;
-
-          if (!content?.trim()) return;
-
-          if (role === 'user') {
-            addTranscriptEntry({
-              id: `user-${Date.now()}`,
-              role: 'user',
-              content,
-              timestamp: Date.now(),
-            });
-            if (convId) {
-              const p = fetch('/api/conversations', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ conversationId: convId, role: 'user', content }),
-              }).catch(console.error);
-              pendingSavesRef.current.push(p);
-            }
-          }
-
-          if (role === 'assistant') {
-            addTranscriptEntry({
-              id: `assistant-${Date.now()}`,
-              role: 'assistant',
-              content,
-              timestamp: Date.now(),
-            });
-            if (convId) {
-              const p = fetch('/api/conversations', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ conversationId: convId, role: 'assistant', content }),
-              }).catch(console.error);
-              pendingSavesRef.current.push(p);
-            }
-          }
-        }
-
-        // ── Function call request (client-side execution) ──────────────────
-        if (type === 'FunctionCallRequest') {
-          const functionName = data.function_name as string;
-          const toolArgs = (data.input as Record<string, unknown>) || {};
-          const functionCallId = data.function_call_id as string;
-
-          try {
-            const toolRes = await fetch('/api/realtime/tools', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                toolName: functionName,
-                toolArgs,
-                businessId,
-                conversationId: convId,
-              }),
-            });
-            const { result } = await toolRes.json();
-
-            // Send result back to Deepgram
-            ws.send(JSON.stringify({
-              type: 'FunctionCallResponse',
-              function_call_id: functionCallId,
-              output: JSON.stringify(result),
-            }));
-          } catch (err) {
-            console.error('Function call failed:', err);
-            ws.send(JSON.stringify({
-              type: 'FunctionCallResponse',
-              function_call_id: functionCallId,
-              output: JSON.stringify({ error: 'Function call failed' }),
-            }));
-          }
-        }
-
-        // ── Agent audio done ──────────────────────────────────────────────
-        if (type === 'AgentAudioDone') {
-          setConnectionState({ status: 'listening' });
-        }
-
-        // ── Welcome (connection established) ──────────────────────────────
-        if (type === 'Welcome') {
-          console.log('[Deepgram] Connected to Voice Agent');
-        }
-
-        // ── Errors ─────────────────────────────────────────────────────────
-        if (type === 'Error') {
-          const msg = (data.description as string) || 'Unknown error';
-          console.error('[Deepgram] Error:', msg);
-          setConnectionState({ status: 'error', error: msg });
-        }
-      };
-
-      ws.onerror = (err) => {
-        console.error('[Deepgram] WebSocket error:', err);
-        setConnectionState({ status: 'error', error: 'Connection error' });
-      };
-
-      ws.onclose = () => {
+      connection.on('close', () => {
+        socketOpenRef.current = false;
+        audioQueueRef.current = [];
         setConnectionState({ status: 'idle' });
-      };
+      });
 
-      // Phase 4: Capture microphone audio and stream to Deepgram
+      // Phase 4b: Actually open the WebSocket (socket starts in "closed" state)
+      connection.connect();
+
+      // Phase 5: mic capture → AudioWorklet → SDK send
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           channelCount: 1,
@@ -318,30 +364,22 @@ export function useRealtimeVoice({ businessId, onConversationEnd }: UseRealtimeV
       });
       mediaStreamRef.current = stream;
 
-      const audioContext = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)({
-        sampleRate: 16000,
-      });
-      audioContextRef.current = audioContext;
+      // Separate AudioContexts: 16 kHz for mic, 24 kHz for playback
+      const micContext = new AudioContext({ sampleRate: 16000 });
+      micContextRef.current = micContext;
 
-      const source = audioContext.createMediaStreamSource(stream);
-      // ScriptProcessor is deprecated but widely supported; AudioWorklet is the modern replacement
-      const processor = audioContext.createScriptProcessor(4096, 1, 1);
-      processorRef.current = processor;
+      const playbackContext = new AudioContext({ sampleRate: 24000 });
+      playbackContextRef.current = playbackContext;
 
-      processor.onaudioprocess = (e) => {
-        if (ws.readyState !== WebSocket.OPEN) return;
-        const inputData = e.inputBuffer.getChannelData(0);
-        // Convert float32 samples to Int16 PCM
-        const pcm = new Int16Array(inputData.length);
-        for (let i = 0; i < inputData.length; i++) {
-          const s = Math.max(-1, Math.min(1, inputData[i]));
-          pcm[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+      await setupPlaybackWorklet(playbackContext);
+      await setupMicWorklet(micContext, stream, (buffer) => {
+        if (socketOpenRef.current) {
+          connection.sendMedia(buffer);
+        } else {
+          // Queue frames until socket opens (prevents "Socket is not open" crash)
+          audioQueueRef.current.push(buffer);
         }
-        ws.send(pcm.buffer);
-      };
-
-      source.connect(processor);
-      processor.connect(audioContext.destination);
+      });
 
     } catch (err) {
       console.error('Voice connection error:', err);
@@ -351,11 +389,11 @@ export function useRealtimeVoice({ businessId, onConversationEnd }: UseRealtimeV
       });
       cleanup();
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [businessId, connectionState.status]);
+  }, [businessId, agentId, connectionState.status, setConnectionState, clearTranscript, setConversationId, setupMicWorklet, setupPlaybackWorklet, saveMessage, handleMessage, cleanup]);
 
+  // ── Disconnect ────────────────────────────────────────────────────────────
   const disconnect = useCallback(async () => {
-    const convId = conversationId;
+    const convId = conversationIdRef.current;
     const duration = startTimeRef.current
       ? Math.round((Date.now() - startTimeRef.current) / 1000)
       : null;
@@ -378,61 +416,18 @@ export function useRealtimeVoice({ businessId, onConversationEnd }: UseRealtimeV
 
       onConversationEnd?.(convId);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [conversationId, onConversationEnd]);
-
-  const cleanup = () => {
-    // Stop microphone
-    mediaStreamRef.current?.getTracks().forEach((t) => t.stop());
-    mediaStreamRef.current = null;
-
-    // Stop audio processor
-    processorRef.current?.disconnect();
-    processorRef.current = null;
-
-    // Close audio context
-    if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
-      audioContextRef.current.close().catch(() => {});
-    }
-    audioContextRef.current = null;
-
-    // Close WebSocket
-    if (wsRef.current) {
-      if (wsRef.current.readyState === WebSocket.OPEN) {
-        wsRef.current.close();
-      }
-    }
-    wsRef.current = null;
-
-    // Stop any playing audio
-    if (audioElementRef.current) {
-      audioElementRef.current.pause();
-      audioElementRef.current.src = '';
-    }
-    audioQueueRef.current = [];
-    isPlayingRef.current = false;
-    startTimeRef.current = null;
-  };
+  }, [onConversationEnd, cleanup, setConnectionState]);
 
   const toggleMute = useCallback(() => {
     mediaStreamRef.current?.getAudioTracks().forEach((track) => {
-      track.enabled = isMuted; // if currently muted, enable; if enabled, mute
+      track.enabled = isMuted;
     });
     setMuted(!isMuted);
   }, [isMuted, setMuted]);
 
   useEffect(() => {
-    return () => {
-      cleanup();
-    };
-  }, []);
+    return () => { cleanup(); };
+  }, [cleanup]);
 
-  return {
-    connect,
-    disconnect,
-    toggleMute,
-    connectionState,
-    isMuted,
-    conversationId,
-  };
+  return { connect, disconnect, toggleMute, connectionState, isMuted, conversationId };
 }

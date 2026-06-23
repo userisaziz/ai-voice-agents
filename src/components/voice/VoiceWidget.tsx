@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Mic, Phone, Sparkles } from 'lucide-react';
 import { useRealtimeVoice } from '@/hooks/useRealtimeVoice';
@@ -12,6 +12,7 @@ import { cn } from '@/lib/utils';
 
 interface VoiceWidgetProps {
   businessId: string;
+  agentId?: string;
   businessName?: string;
   primaryColor?: string;
   position?: 'bottom-right' | 'bottom-left';
@@ -20,18 +21,24 @@ interface VoiceWidgetProps {
 
 export function VoiceWidget({
   businessId,
-  businessName = 'Marsa Tijarah',
+  agentId,
+  businessName = 'Your Business',
   primaryColor = '#22c55e',
   position = 'bottom-right',
   greeting,
 }: VoiceWidgetProps) {
   const [isOpen, setIsOpen] = useState(false);
   const { transcript, connectionState } = useVoiceStore();
-
   const { connect, disconnect, toggleMute, isMuted } = useRealtimeVoice({
     businessId,
+    agentId,
     onConversationEnd: () => {},
   });
+
+  const isSpeaking = connectionState.status === 'speaking';
+  const isListening = connectionState.status === 'listening';
+  const isActive = isSpeaking || isListening;
+  const isConnected = ['connected', 'listening', 'speaking'].includes(connectionState.status);
 
   const handleClose = async () => {
     if (connectionState.status !== 'idle') {
@@ -39,11 +46,6 @@ export function VoiceWidget({
     }
     setIsOpen(false);
   };
-
-  const isSpeaking = connectionState.status === 'speaking';
-  const isListening = connectionState.status === 'listening';
-  const isActive = isSpeaking || isListening;
-  const isConnected = ['connected', 'listening', 'speaking'].includes(connectionState.status);
 
   const positionClass = position === 'bottom-right' ? 'right-5' : 'left-5';
 
@@ -68,7 +70,6 @@ export function VoiceWidget({
             {/* Header */}
             <div className="relative px-4 py-3.5 flex items-center justify-between overflow-hidden"
               style={{ borderBottom: '1px solid rgba(255,255,255,0.07)' }}>
-              {/* Subtle gradient bg */}
               <div className="absolute inset-0 opacity-20"
                 style={{ background: `linear-gradient(135deg, ${primaryColor}33 0%, transparent 60%)` }} />
 
@@ -134,7 +135,7 @@ export function VoiceWidget({
             <div className="px-4 py-2.5 flex items-center justify-center gap-1.5"
               style={{ borderTop: '1px solid rgba(255,255,255,0.05)', background: 'rgba(0,0,0,0.3)' }}>
               <Sparkles className="w-3 h-3" style={{ color: '#3d5060' }} />
-              <span className="text-[10px]" style={{ color: '#2a3f4d' }}>Powered by Marsa Tijarah</span>
+              <span className="text-[10px]" style={{ color: '#2a3f4d' }}>Powered by VoiceDesk</span>
             </div>
           </motion.div>
         ) : (
@@ -149,21 +150,18 @@ export function VoiceWidget({
             whileHover={{ scale: 1.06 }}
             whileTap={{ scale: 0.94 }}
           >
-            {/* Outer pulse ring */}
             <motion.div
               className="absolute w-16 h-16 rounded-full"
               style={{ background: primaryColor, opacity: 0.25 }}
               animate={{ scale: [1, 1.5], opacity: [0.25, 0] }}
               transition={{ duration: 2.2, repeat: Infinity, ease: 'easeOut' }}
             />
-            {/* Secondary ring */}
             <motion.div
               className="absolute w-16 h-16 rounded-full"
               style={{ background: primaryColor, opacity: 0.15 }}
               animate={{ scale: [1, 1.8], opacity: [0.15, 0] }}
               transition={{ duration: 2.2, repeat: Infinity, ease: 'easeOut', delay: 0.4 }}
             />
-            {/* Button */}
             <div
               className="relative w-14 h-14 rounded-full flex items-center justify-center"
               style={{
@@ -173,8 +171,6 @@ export function VoiceWidget({
             >
               <Phone className="w-6 h-6 text-white" />
             </div>
-
-            {/* Tooltip */}
             <div
               className="absolute bottom-full mb-3 right-0 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold whitespace-nowrap pointer-events-none"
               style={{ background: 'rgba(8,14,16,0.95)', border: '1px solid rgba(255,255,255,0.1)', color: '#e2e8f0', boxShadow: '0 4px 16px rgba(0,0,0,0.4)' }}

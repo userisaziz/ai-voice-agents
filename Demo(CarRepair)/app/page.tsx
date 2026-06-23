@@ -29,10 +29,21 @@ const hours = [
   { day: 'Sunday', time: 'Closed' },
 ];
 
+const demoQuestions = [
+  '"How much is an oil change?"',
+  '"Can I book a brake inspection for tomorrow?"',
+  '"What are your business hours?"',
+  '"My check engine light is on — can you help?"',
+  '"Do you offer same-day service?"',
+  '"What\'s your address?"',
+];
+
 export default function HomePage() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [widgetReady, setWidgetReady] = useState(false);
   const [scrolled, setScrolled] = useState(false);
+  const [demoActive, setDemoActive] = useState(false);
+  const [demoStep, setDemoStep] = useState(0);
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 40);
@@ -41,8 +52,8 @@ export default function HomePage() {
   }, []);
 
   const initWidget = () => {
-    if (typeof window !== 'undefined' && (window as any).CarBot && BUSINESS_ID) {
-      (window as any).CarBot.init({
+    if (typeof window !== 'undefined' && (window as any).VoiceDesk && BUSINESS_ID) {
+      (window as any).VoiceDesk.init({
         businessId: BUSINESS_ID,
         position: 'bottom-right',
       });
@@ -77,15 +88,15 @@ export default function HomePage() {
 
           {/* Desktop nav */}
           <nav className="hidden md:flex items-center gap-7">
-            {['Services', 'About', 'Testimonials', 'Hours', 'Contact'].map((item) => (
+            {[{ label: 'Live Demo', href: '#live-demo' }, { label: 'Services', href: '#services' }, { label: 'About', href: '#about' }, { label: 'Testimonials', href: '#testimonials' }, { label: 'Hours', href: '#hours' }, { label: 'Contact', href: '#contact' }].map((item) => (
               <a
-                key={item}
-                href={`#${item.toLowerCase()}`}
+                key={item.label}
+                href={item.href}
                 className={`text-sm font-medium transition-colors hover:text-blue-500 ${
                   scrolled ? 'text-gray-600' : 'text-white/80'
                 }`}
               >
-                {item}
+                {item.label}
               </a>
             ))}
             <a
@@ -113,14 +124,14 @@ export default function HomePage() {
         {/* Mobile menu */}
         {menuOpen && (
           <div className="md:hidden bg-white border-t border-gray-100 px-4 py-4 space-y-3">
-            {['Services', 'About', 'Testimonials', 'Hours', 'Contact'].map((item) => (
+            {[{ label: 'Live Demo', href: '#live-demo' }, { label: 'Services', href: '#services' }, { label: 'About', href: '#about' }, { label: 'Testimonials', href: '#testimonials' }, { label: 'Hours', href: '#hours' }, { label: 'Contact', href: '#contact' }].map((item) => (
               <a
-                key={item}
-                href={`#${item.toLowerCase()}`}
+                key={item.label}
+                href={item.href}
                 className="block text-sm font-medium text-gray-700 py-1"
                 onClick={() => setMenuOpen(false)}
               >
-                {item}
+                {item.label}
               </a>
             ))}
             <a
@@ -232,6 +243,137 @@ export default function HomePage() {
               Available 24/7 · No hold time · Instant booking
             </div>
           </div>
+        </section>
+
+        {/* ── LIVE VOICE DEMO ─────────────────────────────────── */}
+        <section id="live-demo" className="py-20 bg-gray-950 relative overflow-hidden">
+          {/* Background effects */}
+          <div className="absolute inset-0" style={{ background: 'radial-gradient(ellipse 60% 50% at 50% 50%, rgba(37,99,235,0.12) 0%, transparent 65%)' }} />
+          <div className="absolute inset-0 opacity-[0.03]" style={{ backgroundImage: 'linear-gradient(#fff 1px, transparent 1px), linear-gradient(90deg, #fff 1px, transparent 1px)', backgroundSize: '48px 48px' }} />
+
+          <div className="max-w-6xl mx-auto px-4 sm:px-6 relative">
+            <div className="grid lg:grid-cols-2 gap-14 items-center">
+              {/* Left — copy */}
+              <div>
+                <div className="inline-flex items-center gap-2 bg-blue-500/15 border border-blue-500/25 rounded-full px-4 py-1.5 mb-7">
+                  <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
+                  <span className="text-blue-300 text-sm font-semibold">Live Demo — Try It Now</span>
+                </div>
+
+                <h2 className="text-3xl sm:text-4xl lg:text-5xl font-extrabold text-white leading-tight mb-5">
+                  Talk to our{' '}
+                  <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-cyan-400">
+                    AI receptionist
+                  </span>
+                </h2>
+
+                <p className="text-gray-400 text-base sm:text-lg leading-relaxed mb-8 max-w-lg">
+                  Click the phone button in the bottom-right corner and ask about our services,
+                  pricing, or book an appointment. This is exactly what your customers experience.
+                </p>
+
+                {/* Feature checklist */}
+                <div className="space-y-3.5 mb-8">
+                  {[
+                    { icon: '🎙️', title: 'Natural voice conversation', desc: 'Speaks and listens like a real receptionist' },
+                    { icon: '⚡', title: 'Sub-second response time', desc: 'Powered by Deepgram voice AI' },
+                    { icon: '📅', title: 'Can book appointments live', desc: 'Try "Book me an oil change for tomorrow"' },
+                    { icon: '💬', title: 'Real-time transcript', desc: 'Every word captured as you speak' },
+                  ].map((f) => (
+                    <div key={f.title} className="flex items-start gap-3">
+                      <div className="w-8 h-8 rounded-lg bg-blue-500/10 border border-blue-500/20 flex items-center justify-center flex-shrink-0 text-base">
+                        {f.icon}
+                      </div>
+                      <div>
+                        <div className="text-white text-sm font-semibold">{f.title}</div>
+                        <div className="text-gray-500 text-xs mt-0.5">{f.desc}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <button
+                  onClick={() => {
+                    const fab = document.querySelector('.voicedesk-fab') as HTMLElement;
+                    if (fab) { fab.click(); setDemoActive(true); }
+                  }}
+                  className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold px-6 py-3 rounded-xl transition-all text-sm shadow-lg shadow-blue-600/30"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 8V5z" />
+                  </svg>
+                  Start Voice Demo
+                </button>
+              </div>
+
+              {/* Right — interactive demo card */}
+              <div className="flex justify-center lg:justify-end">
+                <div className="relative w-full max-w-sm rounded-2xl p-8 text-center overflow-hidden" style={{ background: 'linear-gradient(135deg,rgba(37,99,235,0.08),rgba(6,182,212,0.04))', border: '1px solid rgba(59,130,246,0.2)', boxShadow: '0 0 60px rgba(37,99,235,0.08)' }}>
+                  {/* Top glow */}
+                  <div className="absolute top-0 left-1/2 -translate-x-1/2 w-48 h-24 blur-3xl opacity-30 pointer-events-none" style={{ background: 'radial-gradient(ellipse, #3b82f6, transparent)' }} />
+
+                  {/* Animated orb */}
+                  <div className="relative flex items-center justify-center mb-6">
+                    <div className="absolute w-32 h-32 rounded-full" style={{ background: 'rgba(59,130,246,0.08)', animation: 'demo-pulse 2.2s ease-out infinite' }} />
+                    <div className="absolute w-24 h-24 rounded-full" style={{ background: 'rgba(59,130,246,0.1)', animation: 'demo-pulse 2.2s ease-out 0.4s infinite' }} />
+                    <button
+                      onClick={() => {
+                        const fab = document.querySelector('.voicedesk-fab') as HTMLElement;
+                        if (fab) { fab.click(); setDemoActive(true); }
+                      }}
+                      className="relative w-20 h-20 rounded-full flex items-center justify-center transition-transform hover:scale-105 cursor-pointer"
+                      style={{ background: 'linear-gradient(135deg,#2563eb,#0891b2)', boxShadow: '0 8px 32px rgba(37,99,235,0.5), 0 2px 8px rgba(0,0,0,0.4)' }}
+                    >
+                      <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 8V5z" />
+                      </svg>
+                    </button>
+                  </div>
+
+                  <div className="text-lg font-bold text-white mb-2">Try It Right Now</div>
+                  <p className="text-gray-400 text-sm mb-6 leading-relaxed">
+                    Our AI agent is live. Click the <span className="text-blue-400 font-medium">phone button</span> above or below to start.
+                  </p>
+
+                  {/* Suggested questions */}
+                  <div className="space-y-2 text-left">
+                    <div className="text-[10px] font-bold uppercase tracking-widest mb-3 text-gray-600">Try asking…</div>
+                    {demoQuestions.slice(0, 4).map((q, i) => (
+                      <div
+                        key={q}
+                        className="flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs transition-colors cursor-pointer hover:bg-white/5"
+                        style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', color: '#94a3b8' }}
+                        onClick={() => {
+                          const fab = document.querySelector('.voicedesk-fab') as HTMLElement;
+                          if (fab) { fab.click(); setDemoActive(true); setDemoStep(i + 1); }
+                        }}
+                      >
+                        <svg className="w-3 h-3 flex-shrink-0 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                        </svg>
+                        {q}
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Arrow hint */}
+                  <div className="mt-6 flex items-center justify-center gap-2 text-xs text-blue-400">
+                    <span>Or click the phone icon in the corner</span>
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
+                    </svg>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <style>{`
+            @keyframes demo-pulse {
+              0% { transform: scale(1); opacity: 0.6; }
+              100% { transform: scale(1.6); opacity: 0; }
+            }
+          `}</style>
         </section>
 
         {/* Services */}
@@ -433,7 +575,7 @@ export default function HomePage() {
                   </p>
                   <button
                     onClick={() => {
-                      const fab = document.querySelector('.carbot-fab') as HTMLElement;
+                      const fab = document.querySelector('.voicedesk-fab') as HTMLElement;
                       if (fab) fab.click();
                     }}
                     className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-xl transition-colors flex items-center justify-center gap-2 text-sm"
@@ -461,7 +603,7 @@ export default function HomePage() {
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
               <button
                 onClick={() => {
-                  const fab = document.querySelector('.carbot-fab') as HTMLElement;
+                  const fab = document.querySelector('.voicedesk-fab') as HTMLElement;
                   if (fab) fab.click();
                 }}
                 className="bg-white text-blue-700 font-semibold px-8 py-3.5 rounded-xl hover:bg-blue-50 transition-colors text-sm"

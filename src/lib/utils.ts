@@ -98,15 +98,17 @@ export function getStatusColor(status: string): string {
 export function buildEmbedCode(
   businessId: string,
   appUrl: string,
-  options?: { position?: string; primaryColor?: string }
+  options?: { position?: string; primaryColor?: string; mode?: string }
 ): string {
   const pos = options?.position || 'bottom-right';
-  return `<!-- CarBot AI Voice Widget -->
+  const mode = options?.mode || 'voice';
+  const modeLine = mode === 'chat' ? '\n    mode: "chat",' : '';
+  return `<!-- VoiceDesk AI ${mode === 'chat' ? 'Chat' : 'Voice'} Widget -->
 <script src="${appUrl}/widget.js"></script>
 <script>
-  CarBot.init({
+  VoiceDesk.init({
     businessId: "${businessId}",
-    position: "${pos}",
+    position: "${pos}",${modeLine}
   });
 </script>`;
 }

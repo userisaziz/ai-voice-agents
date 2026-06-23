@@ -39,9 +39,7 @@ export const appointmentSchema = z.object({
   customer_name: z.string().min(2, 'Customer name is required'),
   customer_phone: z.string().min(10, 'Enter a valid phone number').optional().or(z.literal('')),
   customer_email: z.string().email('Enter a valid email').optional().or(z.literal('')),
-  vehicle_year: z.string().optional().or(z.literal('')),
-  vehicle_make: z.string().optional().or(z.literal('')),
-  vehicle_model: z.string().optional().or(z.literal('')),
+  custom_fields: z.record(z.unknown()).optional().nullable(),
   service_id: z.string().uuid().optional().nullable(),
   scheduled_at: z.string().min(1, 'Appointment date and time is required'),
   duration_minutes: z.number().min(15).max(480).default(60),
@@ -60,6 +58,7 @@ export const faqSchema = z.object({
 export const widgetSchema = z.object({
   name: z.string().min(2, 'Widget name is required').max(100),
   agent_id: z.string().uuid().optional().nullable(),
+  widget_type: z.enum(['voice', 'chat']).default('voice'),
   position: z.enum(['bottom-right', 'bottom-left']).default('bottom-right'),
   primary_color: z.string().regex(/^#[0-9A-Fa-f]{6}$/, 'Enter a valid hex color').default('#22c55e'),
   greeting: z.string().max(300).optional().or(z.literal('')),
@@ -96,3 +95,78 @@ export type WidgetFormData = z.infer<typeof widgetSchema>;
 export type LoginFormData = z.infer<typeof loginSchema>;
 export type SignupFormData = z.infer<typeof signupSchema>;
 export type BusinessHoursFormData = z.infer<typeof businessHoursSchema>;
+
+// =============================================
+// TELEPHONY VALIDATION SCHEMAS
+// =============================================
+
+export const twilioCredentialsSchema = z.object({
+  accountSid: z.string().min(1, 'Account SID is required'),
+  authToken: z.string().min(1, 'Auth Token is required'),
+});
+
+export const vapiCredentialsSchema = z.object({
+  apiKey: z.string().min(1, 'API Key is required'),
+  assistantId: z.string().optional(),
+});
+
+export const vobizCredentialsSchema = z.object({
+  apiKey: z.string().min(1, 'API Key is required'),
+  userId: z.string().optional(),
+});
+
+export const telephonyProviderSchema = z.object({
+  name: z.string().min(2, 'Provider name must be at least 2 characters').max(100),
+  provider_type: z.enum(['twilio', 'vapi', 'vobiz']),
+  credentials: z.union([twilioCredentialsSchema, vapiCredentialsSchema, vobizCredentialsSchema]),
+  is_default: z.boolean().default(false),
+  is_active: z.boolean().default(true),
+  webhook_url: z.string().url('Enter a valid URL').optional().or(z.literal('')),
+});
+
+export const phoneNumberSchema = z.object({
+  provider_id: z.string().uuid('Provider is required'),
+  number: z.string().min(10, 'Enter a valid phone number'),
+  friendly_name: z.string().max(100).optional().or(z.literal('')),
+  direction: z.enum(['inbound', 'outbound', 'both']).default('both'),
+  is_active: z.boolean().default(true),
+});
+
+export const inboundConfigSchema = z.object({
+  phone_number_id: z.string().uuid('Phone number is required'),
+  agent_id: z.string().uuid().optional().nullable(),
+  greeting_override: z.string().max(500).optional().or(z.literal('')),
+  lead_capture_enabled: z.boolean().default(true),
+  appointment_booking_enabled: z.boolean().default(true),
+  faq_enabled: z.boolean().default(true),
+  service_info_enabled: z.boolean().default(true),
+  is_active: z.boolean().default(true),
+});
+
+export const outboundCampaignSchema = z.object({
+  name: z.string().min(2, 'Campaign name is required').max(100),
+  description: z.string().max(500).optional().or(z.literal('')),
+  status: z.enum(['draft', 'scheduled', 'running', 'completed', 'paused', 'cancelled']).default('draft'),
+  cron_expression: z.string().optional().or(z.literal('')),
+  timezone: z.string().default('America/New_York'),
+  caller_number_id: z.string().uuid().optional().nullable(),
+  agent_id: z.string().uuid().optional().nullable(),
+  max_concurrent_calls: z.number().min(1).max(10).default(1),
+  call_delay_seconds: z.number().min(0).max(60).default(0),
+  retry_attempts: z.number().min(0).max(5).default(0),
+  retry_delay_minutes: z.number().min(5).max(1440).default(30),
+});
+
+export const campaignLeadSchema = z.object({
+  name: z.string().min(2, 'Lead name is required').max(100),
+  phone: z.string().min(10, 'Enter a valid phone number'),
+  email: z.string().email('Enter a valid email').optional().or(z.literal('')),
+  custom_fields: z.record(z.unknown()).optional().nullable(),
+  notes: z.string().max(1000).optional().or(z.literal('')),
+});
+
+export type TelephonyProviderFormData = z.infer<typeof telephonyProviderSchema>;
+export type PhoneNumberFormData = z.infer<typeof phoneNumberSchema>;
+export type InboundConfigFormData = z.infer<typeof inboundConfigSchema>;
+export type OutboundCampaignFormData = z.infer<typeof outboundCampaignSchema>;
+export type CampaignLeadFormData = z.infer<typeof campaignLeadSchema>;

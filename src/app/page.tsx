@@ -135,7 +135,7 @@ const steps = [
     num: '02',
     icon: Bot,
     title: 'Configure Your AI Agent',
-    desc: 'Choose a voice, personality, and greeting. The AI learns your specific shop details.',
+    desc: 'Choose a voice, personality, and greeting. The AI learns your specific business details.',
     highlight: 'Trained on your exact services',
   },
   {
@@ -157,10 +157,10 @@ const steps = [
 const testimonials = [
   {
     quote:
-      'Our missed call rate dropped to zero overnight. CarBot handles every inquiry, books appointments, and even upsells service packages. Best investment we made this year.',
+      'Our missed call rate dropped to zero overnight. VoiceDesk handles every inquiry, books appointments, and even upsells service packages. Best investment we made this year.',
     author: 'Mike Thompson',
     role: 'Owner',
-    business: 'Premier Auto Repair, Austin TX',
+    business: 'Thompson Consulting, Austin TX',
     rating: 5,
     metric: '0 missed calls',
   },
@@ -169,7 +169,7 @@ const testimonials = [
       "I was skeptical about AI handling customer calls, but the voice quality is incredible. Customers genuinely can't tell they're talking to a bot. Bookings up 40%.",
     author: 'Sarah Lin',
     role: 'General Manager',
-    business: 'Quick Lube Plus, Chicago IL',
+    business: 'Lin & Associates, Chicago IL',
     rating: 5,
     metric: '+40% bookings',
   },
@@ -178,7 +178,7 @@ const testimonials = [
       'ROI in the first week. The AI booked $2,400 in appointments that would have gone to voicemail. It pays for itself ten times over every month.',
     author: 'James Rivera',
     role: 'Co-Owner',
-    business: 'Riverside Motors, Miami FL',
+    business: 'Riverside Dental, Miami FL',
     rating: 5,
     metric: '$2,400 week 1',
   },
@@ -187,7 +187,7 @@ const testimonials = [
       'Setup was surprisingly fast. We had it live on our website in 20 minutes. The dashboard analytics help us understand what customers are calling about.',
     author: 'David Chen',
     role: 'Operations Director',
-    business: 'Pacific Auto Group, Seattle WA',
+    business: 'Pacific Wellness Group, Seattle WA',
     rating: 5,
     metric: 'Live in 20 min',
   },
@@ -198,7 +198,7 @@ const plans = [
     name: 'Starter',
     price: 'Free',
     period: 'forever · self-hosted',
-    desc: 'Perfect for a single shop testing AI voice.',
+    desc: 'Perfect for a single location testing AI voice.',
     features: [
       '1 Business profile',
       '1 AI Voice Agent',
@@ -216,7 +216,7 @@ const plans = [
     name: 'Pro',
     price: '$49',
     period: 'per month',
-    desc: 'For growing shops that need more power.',
+    desc: 'For growing businesses that need more power.',
     features: [
       'Multiple businesses',
       'Unlimited AI agents',
@@ -269,7 +269,7 @@ export default function LandingPage() {
               <Mic className="w-4 h-4 text-white" />
             </div>
             <span className="text-[15px] font-bold tracking-tight">
-              CarBot <span className="text-green-400">AI</span>
+              VoiceDesk
             </span>
           </div>
 
@@ -362,7 +362,7 @@ export default function LandingPage() {
               </div>
 
               <h1 className="text-5xl lg:text-6xl font-bold tracking-tight leading-[1.08] mb-6">
-                Your Shop
+                Your Business
                 <br />
                 <span
                   style={{
@@ -378,7 +378,7 @@ export default function LandingPage() {
 
               <p className="text-[17px] text-gray-400 leading-relaxed mb-8 max-w-lg">
                 Deploy an AI voice receptionist that answers calls, books appointments, and captures
-                leads — 24/7, while you focus on the repairs.
+                leads — 24/7, while you focus on your business.
               </p>
 
               {/* CTAs */}
@@ -427,7 +427,7 @@ export default function LandingPage() {
                       <Star key={i} className="w-3 h-3 fill-amber-400 text-amber-400" />
                     ))}
                   </div>
-                  <p className="text-[11px] text-gray-500">Trusted by 200+ auto repair shops</p>
+                  <p className="text-[11px] text-gray-500">Trusted by 200+ businesses</p>
                 </div>
               </div>
             </div>
@@ -455,7 +455,7 @@ export default function LandingPage() {
                       className="px-4 py-1 rounded-md text-[11px] text-gray-500"
                       style={{ background: 'rgba(255,255,255,0.05)' }}
                     >
-                      app.carbot.ai/dashboard
+                      app.voicedesk.ai/dashboard
                     </div>
                   </div>
                 </div>
@@ -522,7 +522,7 @@ export default function LandingPage() {
                         Live call in progress
                       </div>
                       <div className="text-[10px] text-gray-500">
-                        Oil change + tire rotation inquiry
+                        Service inquiry
                       </div>
                     </div>
                     <div className="flex gap-1 items-end h-4">
@@ -603,7 +603,7 @@ export default function LandingPage() {
               <Zap className="w-3 h-3" /> Core Features
             </div>
             <h2 className="text-4xl md:text-5xl font-bold tracking-tight mb-4">
-              Everything your shop
+              Everything your business
               <br />
               <span
                 style={{
@@ -683,7 +683,7 @@ export default function LandingPage() {
                 accent: '#f59e0b',
                 tag: 'Always On',
                 title: '24/7 — Nights & Weekends',
-                desc: 'Every call answered even when your shop is closed.',
+                desc: 'Every call answered even when your office is closed.',
               },
               {
                 icon: LineChart,
@@ -870,7 +870,7 @@ export default function LandingPage() {
                 <Star className="w-3 h-3 fill-amber-400" /> Reviews
               </div>
               <h2 className="text-4xl md:text-5xl font-bold tracking-tight">
-                Shops that
+                Businesses that
                 <br />
                 <span
                   style={{
@@ -1072,7 +1072,7 @@ export default function LandingPage() {
                     <span style={{ color: '#f97316' }}>{'<script>'}</span>
                   </div>
                   <div className="ml-6">
-                    <span style={{ color: '#e2e8f0' }}>CarBot.</span>
+                    <span style={{ color: '#e2e8f0' }}>VoiceDesk.</span>
                     <span style={{ color: '#4ade80' }}>init</span>
                     <span style={{ color: '#e2e8f0' }}>{'({'}</span>
                   </div>
@@ -1181,7 +1181,7 @@ export default function LandingPage() {
                   {
                     icon: Calendar,
                     title: 'Can book appointments',
-                    desc: 'Try asking "I need an oil change tomorrow"',
+                    desc: 'Try asking "I need an appointment tomorrow"',
                   },
                   {
                     icon: MessageSquare,
@@ -1271,7 +1271,7 @@ export default function LandingPage() {
                   </div>
                   {[
                     '"What services do you offer?"',
-                    '"How much is an oil change?"',
+                    '"How much is a consultation?"',
                     '"Can I book for tomorrow at 10am?"',
                     '"What are your business hours?"',
                   ].map((q) => (
@@ -1442,10 +1442,10 @@ export default function LandingPage() {
           <p className="text-center text-[12px] text-gray-600 mt-10">
             Questions?{' '}
             <a
-              href="mailto:support@carbot.ai"
+              href="mailto:support@voicedesk.ai"
               className="text-green-400 hover:text-green-300 transition-colors"
             >
-              support@carbot.ai
+              support@voicedesk.ai
             </a>
           </p>
         </div>
@@ -1490,7 +1490,7 @@ export default function LandingPage() {
             </span>
           </h2>
           <p className="text-gray-400 text-xl mb-10 max-w-xl mx-auto leading-relaxed">
-            Join 200+ auto repair shops that never miss a customer call. Setup takes less than 30
+            Join 200+ businesses that never miss a customer call. Setup takes less than 30
             minutes.
           </p>
           <div className="flex flex-col sm:flex-row gap-3 justify-center">
@@ -1538,11 +1538,11 @@ export default function LandingPage() {
                   <Mic className="w-4 h-4 text-white" />
                 </div>
                 <span className="text-[15px] font-bold">
-                  CarBot <span className="text-green-400">AI</span>
+                  VoiceDesk
                 </span>
               </div>
               <p className="text-[13px] text-gray-500 leading-relaxed mb-6 max-w-xs">
-                AI voice receptionist platform built for auto repair businesses. Never miss a call,
+                AI voice receptionist platform for any business. Never miss a call,
                 never miss a booking.
               </p>
               <div className="flex gap-3">
@@ -1590,7 +1590,7 @@ export default function LandingPage() {
             className="flex flex-col md:flex-row items-center justify-between gap-4 pt-8"
             style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}
           >
-            <p className="text-[12px] text-gray-600">© 2026 CarBot AI. All rights reserved.</p>
+            <p className="text-[12px] text-gray-600">© 2026 VoiceDesk. All rights reserved.</p>
             <div className="flex items-center gap-2 text-[12px] text-gray-600">
               <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
               All systems operational
@@ -1612,14 +1612,14 @@ export default function LandingPage() {
 
       {/* ── LIVE DEMO WIDGET — home page only ───────────────────── */}
       {demoBizId && (
-        <Script id="carbot-demo-init" strategy="afterInteractive">
+        <Script id="voicedesk-demo-init" strategy="afterInteractive">
           {`
             (function() {
               if (window.location.pathname !== '/') return;
               var s = document.createElement('script');
               s.src = '${appUrl}/widget.js';
               s.onload = function() {
-                CarBot.init({ businessId: '${demoBizId}', position: 'bottom-right' });
+                VoiceDesk.init({ businessId: '${demoBizId}', position: 'bottom-right' });
               };
               document.body.appendChild(s);
             })();

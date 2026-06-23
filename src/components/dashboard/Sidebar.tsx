@@ -5,7 +5,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import {
   LayoutDashboard, Bot, Calendar, MessageSquare, Wrench,
-  HelpCircle, Code2, BarChart3, Settings, Mic, LogOut,
+  HelpCircle, Code2, BarChart3, Settings, Mic, LogOut, Phone,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { createClient } from '@/lib/supabase/client';
@@ -25,6 +25,7 @@ const navGroups = [
     label: 'Configure',
     items: [
       { href: '/dashboard/agents',   label: 'AI Agents', icon: Bot },
+      { href: '/dashboard/telephony', label: 'Telephony', icon: Phone },
       { href: '/dashboard/services', label: 'Services',  icon: Wrench },
       { href: '/dashboard/faqs',     label: 'FAQs',      icon: HelpCircle },
       { href: '/dashboard/widget',   label: 'Widget',    icon: Code2 },
@@ -79,8 +80,8 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
               style={{ borderColor: '#080e10' }} />
           </div>
           <div className="flex flex-col leading-none">
-            <span className="text-[13px] font-bold tracking-tight text-white">Marsa <span className="text-green-400">Tijarah</span></span>
-            <span className="text-[10px] text-green-500/70 font-medium mt-0.5">B2B Marketplace</span>
+            <span className="text-[13px] font-bold tracking-tight text-white">VoiceDesk</span>
+            <span className="text-[10px] text-green-500/70 font-medium mt-0.5">Voice Platform</span>
           </div>
         </div>
 

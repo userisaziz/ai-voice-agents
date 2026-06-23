@@ -94,7 +94,7 @@ export default function LoginPage() {
             </div>
             <div>
               <span className="text-[20px] font-bold tracking-tight" style={{ color: '#f1f5f9' }}>
-                CarBot <span style={{ color: '#4ade80' }}>AI</span>
+                VoiceDesk
               </span>
               <p className="text-[11px] leading-none mt-0.5" style={{ color: '#3d5060' }}>AI Voice Receptionist Platform</p>
             </div>
@@ -115,14 +115,14 @@ export default function LoginPage() {
             </div>
 
             <h2 className="text-[36px] font-bold leading-[1.15] tracking-tight mb-4" style={{ color: '#f1f5f9' }}>
-              Your auto shop&apos;s<br />
+              Your business&apos;s<br />
               <span style={{ background: 'linear-gradient(90deg,#4ade80,#bbf7d0)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
                 AI receptionist
               </span><br />
               never sleeps.
             </h2>
             <p className="text-[14px] leading-relaxed mb-10" style={{ color: '#4b6070', maxWidth: '340px' }}>
-              Handle calls, book appointments, and capture leads automatically — while you focus on fixing cars.
+              Handle calls, book appointments, and capture leads automatically — while you focus on your business.
             </p>
 
             {/* Feature list */}
@@ -169,7 +169,7 @@ export default function LoginPage() {
             <Mic className="w-5 h-5 text-white" />
           </div>
           <span className="text-[20px] font-bold tracking-tight" style={{ color: '#f1f5f9' }}>
-            CarBot <span style={{ color: '#4ade80' }}>AI</span>
+            VoiceDesk
           </span>
         </div>
 
@@ -198,7 +198,7 @@ export default function LoginPage() {
             <div className="absolute top-0 left-0 right-0 h-[2px] rounded-t-2xl" style={{ background: 'linear-gradient(90deg,#22c55e,#16a34a)' }} />
 
             <h1 className="text-[22px] font-bold tracking-tight mb-1" style={{ color: '#f1f5f9' }}>Welcome back</h1>
-            <p className="text-[13px] mb-6" style={{ color: '#4b6070' }}>Sign in to your CarBot dashboard</p>
+            <p className="text-[13px] mb-6" style={{ color: '#4b6070' }}>Sign in to your VoiceDesk dashboard</p>
 
             <Suspense fallback={
               <div className="h-36 flex items-center justify-center text-[13px]" style={{ color: '#4b6070' }}>Loading...</div>

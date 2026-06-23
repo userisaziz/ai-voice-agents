@@ -17,11 +17,9 @@ import { useToast } from '@/components/ui/Toast';
 import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { serviceSchema, type ServiceFormData } from '@/validations';
-import { PRICE_TYPES, SUGGESTED_SERVICES } from '@/constants';
+import { PRICE_TYPES } from '@/constants';
 import { formatPrice } from '@/lib/utils';
 import type { Service } from '@/types';
-
-type SuggestedService = typeof SUGGESTED_SERVICES[number];
 
 export default function ServicesPage() {
   const { business } = useBusinessStore();
@@ -32,7 +30,6 @@ export default function ServicesPage() {
   const [editingService, setEditingService] = useState<Service | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [addingSuggested, setAddingSuggested] = useState<string | null>(null);
 
   const { register, handleSubmit, reset, watch, control, formState: { errors, isSubmitting } } = useForm<ServiceFormData>({
     resolver: zodResolver(serviceSchema),
@@ -91,25 +88,6 @@ export default function ServicesPage() {
     }
   };
 
-  const addSuggestedService = async (suggested: SuggestedService) => {
-    if (!business) return;
-    setAddingSuggested(suggested.name);
-    try {
-      const created = await createService(business.id, {
-        name: suggested.name, description: suggested.description, duration_minutes: suggested.duration_minutes,
-        price_type: suggested.price_type, price_min: suggested.price_min, price_max: suggested.price_max ?? undefined,
-        is_active: true, sort_order: services.length,
-      });
-      setServices((prev) => [...prev, created]);
-      toast.success(`"${suggested.name}" added`);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Unknown error';
-      toast.error('Failed to add service', msg);
-    } finally {
-      setAddingSuggested(null);
-    }
-  };
-
   const handleDelete = async (id: string) => {
     setDeletingId(id);
     try {
@@ -130,7 +108,7 @@ export default function ServicesPage() {
       <Card>
         <CardHeader
           title="Services"
-          description="Manage your auto repair services"
+          description="Manage your services"
           action={<Button icon={<Plus className="w-4 h-4" />} onClick={openCreate}>Add Service</Button>}
         />
 
@@ -180,42 +158,6 @@ export default function ServicesPage() {
           </div>
         )}
       </Card>
-
-      {services.length === 0 && !loading && (
-        <Card>
-          <CardHeader title="Quick Start — Add Common Services" description="Click any service below to instantly add it to your catalog" />
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-            {SUGGESTED_SERVICES.map((s) => (
-              <button
-                key={s.name}
-                onClick={() => addSuggestedService(s)}
-                disabled={addingSuggested === s.name}
-                className="flex items-start gap-3 p-3 rounded-xl text-left transition-all duration-100 disabled:opacity-50 disabled:cursor-not-allowed"
-                style={{ border: '1px solid rgba(255,255,255,0.07)', background: 'rgba(255,255,255,0.02)' }}
-                onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = 'rgba(34,197,94,0.25)'; (e.currentTarget as HTMLElement).style.background = 'rgba(34,197,94,0.04)'; }}
-                onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = 'rgba(255,255,255,0.07)'; (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.02)'; }}
-              >
-                <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 transition-colors"
-                  style={{ background: 'rgba(255,255,255,0.05)', color: '#4b6070' }}>
-                  <Wrench className="w-4 h-4" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="text-[13px] font-semibold" style={{ color: '#e2e8f0' }}>{s.name}</div>
-                  <div className="text-[11px] mt-0.5 truncate" style={{ color: '#3d5060' }}>{s.description}</div>
-                  <div className="text-[11px] font-medium mt-1" style={{ color: '#4ade80' }}>{formatPrice(s.price_min, s.price_max ?? null, s.price_type)} · {s.duration_minutes} min</div>
-                </div>
-                <div className="flex-shrink-0">
-                  {addingSuggested === s.name ? (
-                    <div className="w-5 h-5 border-2 border-t-transparent rounded-full animate-spin" style={{ borderColor: 'rgba(34,197,94,0.5)', borderTopColor: 'transparent' }} />
-                  ) : (
-                    <Plus className="w-4 h-4" style={{ color: '#3d5060' }} />
-                  )}
-                </div>
-              </button>
-            ))}
-          </div>
-        </Card>
-      )}
 
       <Modal isOpen={modalOpen} onClose={() => setModalOpen(false)} title={editingService ? 'Edit Service' : 'Add Service'} size="lg">
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">

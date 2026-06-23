@@ -57,10 +57,11 @@ export async function GET(req: NextRequest) {
         state: business.state,
       },
       widget: widget ? {
+        widget_type: widget.widget_type || 'voice',
         position: widget.position,
         primary_color: widget.primary_color,
         greeting: widget.greeting,
-      } : { position: 'bottom-right', primary_color: '#22c55e' },
+      } : { widget_type: 'voice', position: 'bottom-right', primary_color: '#22c55e' },
       agent: agent ? {
         id: agent.id,
         name: agent.name,

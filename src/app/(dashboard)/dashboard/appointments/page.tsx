@@ -150,7 +150,6 @@ export default function AppointmentsPage() {
             <Table>
               <TableHead>
                 <TableHeader>Customer</TableHeader>
-                <TableHeader>Vehicle</TableHeader>
                 <TableHeader>Service</TableHeader>
                 <TableHeader>Scheduled</TableHeader>
                 <TableHeader>Status</TableHeader>
@@ -164,12 +163,7 @@ export default function AppointmentsPage() {
                       <div className="text-[11px]" style={{ color: '#3d5060' }}>{appt.customer_phone}</div>
                     </TableCell>
                     <TableCell>
-                      <div className="text-[12px]" style={{ color: '#64748b' }}>
-                        {appt.vehicle_year} {appt.vehicle_make} {appt.vehicle_model}
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <span className="text-[12px]" style={{ color: '#64748b' }}>{(appt as Appointment & { service?: Service }).service?.name || '—'}</span>
+                      <span className="text-[12px]" style={{ color: '#64748b' }}>{(appt as Appointment & { service?: Service }).service?.name || appt.notes || '—'}</span>
                     </TableCell>
                     <TableCell>
                       <span className="text-[12px]" style={{ color: '#94a3b8' }}>{formatDateTime(appt.scheduled_at)}</span>
@@ -211,11 +205,6 @@ export default function AppointmentsPage() {
             <Input label="Customer Name" placeholder="John Smith" error={errors.customer_name?.message} required {...register('customer_name')} />
             <Input label="Phone Number" placeholder="(555) 000-0000" error={errors.customer_phone?.message} {...register('customer_phone')} />
           </div>
-          <div className="grid grid-cols-3 gap-4">
-            <Input label="Vehicle Year" placeholder="2021" {...register('vehicle_year')} />
-            <Input label="Make" placeholder="Toyota" {...register('vehicle_make')} />
-            <Input label="Model" placeholder="Camry" {...register('vehicle_model')} />
-          </div>
           <div className="grid grid-cols-2 gap-4">
             <Select
               label="Service"
@@ -229,7 +218,7 @@ export default function AppointmentsPage() {
             options={APPOINTMENT_STATUSES.map((s) => ({ value: s.value, label: s.label }))}
             {...register('status')}
           />
-          <Textarea label="Notes" rows={2} placeholder="Any notes..." {...register('notes')} />
+          <Textarea label="Notes" rows={2} placeholder="Any additional details..." {...register('notes')} />
           <div className="flex justify-end gap-3 pt-2">
             <Button type="button" variant="secondary" onClick={() => setModalOpen(false)}>Cancel</Button>
             <Button type="submit" loading={isSubmitting}>Book Appointment</Button>

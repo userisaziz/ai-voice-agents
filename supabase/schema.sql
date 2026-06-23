@@ -1,4 +1,4 @@
--- AI Auto Repair Receptionist - Complete Database Schema
+-- AI Voice Receptionist Platform - Complete Database Schema
 -- Run this in Supabase SQL Editor
 
 -- Enable UUID extension
@@ -99,9 +99,7 @@ create table if not exists appointments (
   customer_name text not null,
   customer_phone text,
   customer_email text,
-  vehicle_year text,
-  vehicle_make text,
-  vehicle_model text,
+  custom_fields jsonb,
   notes text,
   scheduled_at timestamptz not null,
   duration_minutes integer not null default 60,
@@ -183,9 +181,7 @@ create table if not exists leads (
   name text not null,
   phone text,
   email text,
-  vehicle_year text,
-  vehicle_make text,
-  vehicle_model text,
+  custom_fields jsonb,
   service_interest text,
   notes text,
   status text not null default 'new' check (status in ('new', 'contacted', 'qualified', 'converted', 'lost')),
@@ -204,6 +200,7 @@ create table if not exists embedded_widgets (
   business_id uuid not null references businesses(id) on delete cascade,
   agent_id uuid references agents(id) on delete set null,
   name text not null default 'Main Widget',
+  widget_type text not null default 'voice' check (widget_type in ('voice', 'chat')),
   position text not null default 'bottom-right' check (position in ('bottom-right', 'bottom-left')),
   primary_color text not null default '#22c55e',
   greeting text,
@@ -253,6 +250,13 @@ create trigger update_conversations_updated_at before update on conversations fo
 create trigger update_faqs_updated_at before update on faqs for each row execute function update_updated_at_column();
 create trigger update_leads_updated_at before update on leads for each row execute function update_updated_at_column();
 create trigger update_embedded_widgets_updated_at before update on embedded_widgets for each row execute function update_updated_at_column();
+
+-- Telephony triggers
+create trigger update_telephony_providers_updated_at before update on telephony_providers for each row execute function update_updated_at_column();
+create trigger update_phone_numbers_updated_at before update on phone_numbers for each row execute function update_updated_at_column();
+create trigger update_inbound_configs_updated_at before update on inbound_configs for each row execute function update_updated_at_column();
+create trigger update_outbound_campaigns_updated_at before update on outbound_campaigns for each row execute function update_updated_at_column();
+create trigger update_campaign_leads_updated_at before update on campaign_leads for each row execute function update_updated_at_column();
 
 -- =============================================
 -- ROW LEVEL SECURITY
@@ -394,6 +398,206 @@ create policy "Business owners can view analytics"
 create policy "Service role can insert events"
   on analytics_events for insert with check (true);
 
+-- Telephony Providers RLS
+alter table telephony_providers enable row level security;
+
+create policy "Business owners can manage telephony providers"
+  on telephony_providers for all
+  using (is_business_owner(business_id))
+  with check (is_business_owner(business_id));
+
+-- Phone Numbers RLS
+alter table phone_numbers enable row level security;
+
+create policy "Business owners can manage phone numbers"
+  on phone_numbers for all
+  using (is_business_owner(business_id))
+  with check (is_business_owner(business_id));
+
+-- Inbound Configs RLS
+alter table inbound_configs enable row level security;
+
+create policy "Business owners can manage inbound configs"
+  on inbound_configs for all
+  using (is_business_owner(business_id))
+  with check (is_business_owner(business_id));
+
+-- Outbound Campaigns RLS
+alter table outbound_campaigns enable row level security;
+
+create policy "Business owners can manage outbound campaigns"
+  on outbound_campaigns for all
+  using (is_business_owner(business_id))
+  with check (is_business_owner(business_id));
+
+create policy "Service role can update campaigns"
+  on outbound_campaigns for update using (true) with check (true);
+
+-- Campaign Leads RLS
+alter table campaign_leads enable row level security;
+
+create policy "Business owners can manage campaign leads"
+  on campaign_leads for all
+  using (is_business_owner(business_id))
+  with check (is_business_owner(business_id));
+
+create policy "Service role can update campaign leads"
+  on campaign_leads for update using (true) with check (true);
+
+-- Call Logs RLS
+alter table call_logs enable row level security;
+
+create policy "Business owners can view call logs"
+  on call_logs for select using (is_business_owner(business_id));
+
+create policy "Service role can insert call logs"
+  on call_logs for insert with check (true);
+
+create policy "Service role can update call logs"
+  on call_logs for update using (true) with check (true);
+
+-- =============================================
+-- TELEPHONY PROVIDERS TABLE
+-- =============================================
+create table if not exists telephony_providers (
+  id uuid primary key default uuid_generate_v4(),
+  business_id uuid not null references businesses(id) on delete cascade,
+  name text not null,
+  provider_type text not null check (provider_type in ('twilio', 'vapi', 'vobiz')),
+  credentials jsonb not null,
+  is_default boolean not null default false,
+  is_active boolean not null default true,
+  webhook_url text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index idx_telephony_providers_business_id on telephony_providers(business_id);
+create index idx_telephony_providers_provider_type on telephony_providers(provider_type);
+
+-- =============================================
+-- PHONE NUMBERS TABLE
+-- =============================================
+create table if not exists phone_numbers (
+  id uuid primary key default uuid_generate_v4(),
+  business_id uuid not null references businesses(id) on delete cascade,
+  provider_id uuid not null references telephony_providers(id) on delete cascade,
+  number text not null,
+  friendly_name text,
+  direction text not null default 'both' check (direction in ('inbound', 'outbound', 'both')),
+  is_active boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique(provider_id, number)
+);
+
+create index idx_phone_numbers_business_id on phone_numbers(business_id);
+create index idx_phone_numbers_number on phone_numbers(number);
+
+-- =============================================
+-- INBOUND CONFIGS TABLE
+-- =============================================
+create table if not exists inbound_configs (
+  id uuid primary key default uuid_generate_v4(),
+  business_id uuid not null references businesses(id) on delete cascade,
+  phone_number_id uuid not null references phone_numbers(id) on delete cascade,
+  agent_id uuid references agents(id) on delete set null,
+  greeting_override text,
+  lead_capture_enabled boolean not null default true,
+  appointment_booking_enabled boolean not null default true,
+  faq_enabled boolean not null default true,
+  service_info_enabled boolean not null default true,
+  is_active boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique(phone_number_id)
+);
+
+create index idx_inbound_configs_business_id on inbound_configs(business_id);
+create index idx_inbound_configs_phone_number_id on inbound_configs(phone_number_id);
+
+-- =============================================
+-- OUTBOUND CAMPAIGNS TABLE
+-- =============================================
+create table if not exists outbound_campaigns (
+  id uuid primary key default uuid_generate_v4(),
+  business_id uuid not null references businesses(id) on delete cascade,
+  name text not null,
+  description text,
+  status text not null default 'draft' check (status in ('draft', 'scheduled', 'running', 'completed', 'paused', 'cancelled')),
+  cron_expression text,
+  timezone text not null default 'America/New_York',
+  caller_number_id uuid references phone_numbers(id) on delete set null,
+  agent_id uuid references agents(id) on delete set null,
+  max_concurrent_calls integer not null default 1,
+  call_delay_seconds integer not null default 0,
+  retry_attempts integer not null default 0,
+  retry_delay_minutes integer not null default 30,
+  total_leads integer not null default 0,
+  completed_leads integer not null default 0,
+  started_at timestamptz,
+  completed_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index idx_outbound_campaigns_business_id on outbound_campaigns(business_id);
+create index idx_outbound_campaigns_status on outbound_campaigns(status);
+
+-- =============================================
+-- CAMPAIGN LEADS TABLE
+-- =============================================
+create table if not exists campaign_leads (
+  id uuid primary key default uuid_generate_v4(),
+  campaign_id uuid not null references outbound_campaigns(id) on delete cascade,
+  business_id uuid not null references businesses(id) on delete cascade,
+  name text not null,
+  phone text not null,
+  email text,
+  custom_fields jsonb,
+  status text not null default 'pending' check (status in ('pending', 'calling', 'completed', 'failed', 'skipped')),
+  call_attempts integer not null default 0,
+  last_attempt_at timestamptz,
+  call_log_id uuid,
+  notes text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index idx_campaign_leads_campaign_id on campaign_leads(campaign_id);
+create index idx_campaign_leads_status on campaign_leads(status);
+create index idx_campaign_leads_business_id on campaign_leads(business_id);
+
+-- =============================================
+-- CALL LOGS TABLE
+-- =============================================
+create table if not exists call_logs (
+  id uuid primary key default uuid_generate_v4(),
+  business_id uuid not null references businesses(id) on delete cascade,
+  campaign_id uuid references outbound_campaigns(id) on delete set null,
+  lead_id uuid references campaign_leads(id) on delete set null,
+  conversation_id uuid references conversations(id) on delete set null,
+  phone_number_id uuid references phone_numbers(id) on delete set null,
+  direction text not null check (direction in ('inbound', 'outbound')),
+  from_number text,
+  to_number text,
+  status text not null default 'initiated' check (status in ('initiated', 'ringing', 'in-progress', 'completed', 'failed', 'no-answer', 'busy', 'cancelled')),
+  duration_seconds integer,
+  provider_call_id text,
+  provider_type text,
+  recording_url text,
+  error_message text,
+  started_at timestamptz,
+  ended_at timestamptz,
+  created_at timestamptz not null default now()
+);
+
+create index idx_call_logs_business_id on call_logs(business_id);
+create index idx_call_logs_campaign_id on call_logs(campaign_id);
+create index idx_call_logs_direction on call_logs(direction);
+create index idx_call_logs_status on call_logs(status);
+create index idx_call_logs_created_at on call_logs(created_at);
+
 -- =============================================
 -- SEED DEFAULT BUSINESS HOURS (called via function)
 -- =============================================
@@ -412,3 +616,20 @@ begin
   on conflict (business_id, day_of_week) do nothing;
 end;
 $$ language plpgsql security definer;
+
+-- =============================================
+-- TELEPHONY pg_cron SETUP (run manually)
+-- =============================================
+-- Enable pg_cron extension (requires superuser)
+-- create extension if not exists pg_cron;
+
+-- Schedule campaign processing (every minute)
+-- select cron.schedule(
+--   'process-outbound-campaigns',
+--   '* * * * *',
+--   $$select net.http_post(
+--     url := 'https://your-project.supabase.co/functions/v1/process-campaign',
+--     headers := '{"Authorization": "Bearer YOUR_SERVICE_KEY", "Content-Type": "application/json"}'::jsonb,
+--     body := '{}'::jsonb
+--   )$$
+-- );

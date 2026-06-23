@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Code2, Plus, Copy, CheckCheck, Trash2, Edit2, Eye } from 'lucide-react';
+import { Code2, Plus, Copy, CheckCheck, Trash2, Edit2, Eye, MessageCircle, Phone } from 'lucide-react';
 import { useBusinessStore } from '@/store/business';
 import { getWidgets, createWidget, updateWidget, deleteWidget } from '@/services/widgets';
 import { getAgents } from '@/services/agents';
@@ -17,7 +17,7 @@ import { useToast } from '@/components/ui/Toast';
 import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { widgetSchema, type WidgetFormData } from '@/validations';
-import { WIDGET_POSITIONS } from '@/constants';
+import { WIDGET_POSITIONS, WIDGET_TYPES } from '@/constants';
 import { buildEmbedCode } from '@/lib/utils';
 import type { EmbeddedWidget, Agent } from '@/types';
 
@@ -36,7 +36,7 @@ export default function WidgetPage() {
 
   const { register, handleSubmit, reset, control, formState: { errors, isSubmitting } } = useForm<WidgetFormData>({
     resolver: zodResolver(widgetSchema),
-    defaultValues: { position: 'bottom-right', primary_color: '#22c55e', is_active: true },
+    defaultValues: { widget_type: 'voice', position: 'bottom-right', primary_color: '#22c55e', is_active: true },
   });
 
   const load = async () => {
@@ -56,15 +56,52 @@ export default function WidgetPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { load(); }, [business]);
 
+  // Show guidance when business profile isn't set up yet
+  if (!business && !loading) {
+    return (
+      <div className="space-y-5">
+        <Card>
+          <CardHeader
+            title="Embedded Widgets"
+            description="Deploy AI voice widgets on your website"
+          />
+          <div className="flex flex-col items-center justify-center py-16 text-center">
+            <div className="w-16 h-16 rounded-full flex items-center justify-center mb-4" style={{ background: 'rgba(34,197,94,0.1)', border: '1px solid rgba(34,197,94,0.2)' }}>
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
+                <polyline points="9 22 9 12 15 12 15 22" />
+              </svg>
+            </div>
+            <h3 className="text-[15px] font-semibold mb-2" style={{ color: '#e2e8f0' }}>Business Profile Required</h3>
+            <p className="text-[13px] max-w-md mb-6" style={{ color: '#4b6070' }}>
+              You need to set up your business profile first before creating widgets. This links your widgets to the correct business account.
+            </p>
+            <a
+              href="/dashboard/settings"
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg text-[13px] font-semibold text-white transition-all"
+              style={{ background: '#22c55e', boxShadow: '0 4px 12px rgba(34,197,94,0.3)' }}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="3" />
+                <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z" />
+              </svg>
+              Go to Settings
+            </a>
+          </div>
+        </Card>
+      </div>
+    );
+  }
+
   const openCreate = () => {
     setEditingWidget(null);
-    reset({ position: 'bottom-right', primary_color: '#22c55e', is_active: true, name: 'Main Widget' });
+    reset({ widget_type: 'voice', position: 'bottom-right', primary_color: '#22c55e', is_active: true, name: 'Main Widget' });
     setModalOpen(true);
   };
 
   const openEdit = (w: EmbeddedWidget) => {
     setEditingWidget(w);
-    reset({ name: w.name, agent_id: w.agent_id || undefined, position: w.position, primary_color: w.primary_color, greeting: w.greeting || '', is_active: w.is_active });
+    reset({ widget_type: w.widget_type || 'voice', name: w.name, agent_id: w.agent_id || undefined, position: w.position, primary_color: w.primary_color, greeting: w.greeting || '', is_active: w.is_active });
     setModalOpen(true);
   };
 
@@ -105,7 +142,7 @@ export default function WidgetPage() {
   const copyEmbed = (widgetId: string) => {
     const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
     const w = widgets.find((x) => x.id === widgetId);
-    const code = buildEmbedCode(business?.id || '', appUrl, { position: w?.position });
+    const code = buildEmbedCode(business?.id || '', appUrl, { position: w?.position, mode: w?.widget_type || 'voice' });
     navigator.clipboard.writeText(code).then(() => {
       setCopiedId(widgetId);
       toast.success('Embed code copied to clipboard');
@@ -145,6 +182,9 @@ export default function WidgetPage() {
                   <div>
                     <div className="flex items-center gap-2">
                       <span className="text-[13px] font-semibold" style={{ color: '#e2e8f0' }}>{widget.name}</span>
+                      <Badge variant={widget.widget_type === 'chat' ? 'blue' : 'green'}>
+                        {widget.widget_type === 'chat' ? 'Chat' : 'Voice'}
+                      </Badge>
                       <Badge variant={widget.is_active ? 'green' : 'gray'}>
                         {widget.is_active ? 'Active' : 'Inactive'}
                       </Badge>
@@ -173,7 +213,7 @@ export default function WidgetPage() {
                     </Button>
                   </div>
                   <pre className="text-[11px] font-mono whitespace-pre-wrap break-all" style={{ color: '#4ade80' }}>
-                    {buildEmbedCode(business?.id || '', process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000', { position: widget.position })}
+                    {buildEmbedCode(business?.id || '', process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000', { position: widget.position, mode: widget.widget_type || 'voice' })}
                   </pre>
                 </div>
 
@@ -193,6 +233,38 @@ export default function WidgetPage() {
       <Modal isOpen={modalOpen} onClose={() => setModalOpen(false)} title={editingWidget ? 'Edit Widget' : 'Create Widget'} size="lg">
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
           <Input label="Widget Name" placeholder="Main Widget" error={errors.name?.message} required {...register('name')} />
+          <div>
+            <label className="block text-[12px] font-semibold mb-2" style={{ color: '#94a3b8' }}>Widget Type</label>
+            <div className="grid grid-cols-2 gap-3">
+              {WIDGET_TYPES.map((wt) => (
+                <label
+                  key={wt.value}
+                  className="flex items-center gap-3 p-3 rounded-xl cursor-pointer transition-all"
+                  style={{
+                    background: 'rgba(255,255,255,0.03)',
+                    border: '1px solid rgba(255,255,255,0.08)',
+                  }}
+                >
+                  <input
+                    type="radio"
+                    value={wt.value}
+                    {...register('widget_type')}
+                    className="sr-only"
+                  />
+                  <div
+                    className="w-8 h-8 rounded-lg flex items-center justify-center"
+                    style={{ background: 'rgba(255,255,255,0.05)' }}
+                  >
+                    {wt.value === 'voice' ? <Phone className="w-4 h-4" style={{ color: '#94a3b8' }} /> : <MessageCircle className="w-4 h-4" style={{ color: '#94a3b8' }} />}
+                  </div>
+                  <div>
+                    <div className="text-[12px] font-semibold" style={{ color: '#e2e8f0' }}>{wt.label}</div>
+                    <div className="text-[10px]" style={{ color: '#4b6070' }}>{wt.description}</div>
+                  </div>
+                </label>
+              ))}
+            </div>
+          </div>
           <Select
             label="AI Agent"
             options={[{ value: '', label: 'Default (first active agent)' }, ...agents.map((a) => ({ value: a.id, label: a.name }))]}

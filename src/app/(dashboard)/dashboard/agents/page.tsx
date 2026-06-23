@@ -251,7 +251,7 @@ export default function AgentsPage() {
           </div>
           <Select label="Interruption Sensitivity" options={INTERRUPT_SENSITIVITIES.map((i) => ({ value: i.value, label: i.label }))} {...register('interrupt_sensitivity')} />
           <Textarea label="Greeting Message" rows={2} placeholder="Hello! Thank you for calling..." {...register('greeting_message')} />
-          <Textarea label="System Prompt" rows={5} placeholder="You are a professional auto repair receptionist..." hint="Instructions for how the AI should behave" {...register('system_prompt')} />
+          <Textarea label="System Prompt" rows={5} placeholder="You are a professional receptionist..." hint="Instructions for how the AI should behave" {...register('system_prompt')} />
           <div className="flex justify-end gap-3 pt-2">
             <Button type="button" variant="secondary" onClick={() => setModalOpen(false)}>Cancel</Button>
             <Button type="submit" loading={isSubmitting}>{editingAgent ? 'Save Changes' : 'Create Agent'}</Button>

@@ -20,14 +20,14 @@ const benefits = [
 ];
 
 const testimonial = {
-  quote: 'CarBot handles all our after-hours calls. We went from missing 40% of leads to capturing nearly all of them.',
+  quote: 'VoiceDesk handles all our after-hours calls. We went from missing 40% of leads to capturing nearly all of them.',
   author: 'Mike R.',
-  role: 'Owner, Premier Auto Repair',
+  role: 'Owner, Thompson Consulting',
   rating: 5,
 };
 
 const stats = [
-  { icon: Users, value: '500+', label: 'Auto Shops' },
+  { icon: Users, value: '500+', label: 'Businesses' },
   { icon: TrendingUp, value: '40%', label: 'More Leads' },
   { icon: Star, value: '4.9★', label: 'Rating' },
 ];
@@ -118,7 +118,7 @@ export default function SignupPage() {
             </div>
             <div>
               <span className="text-[20px] font-bold tracking-tight" style={{ color: '#f1f5f9' }}>
-                CarBot <span style={{ color: '#4ade80' }}>AI</span>
+                VoiceDesk
               </span>
               <p className="text-[11px] leading-none mt-0.5" style={{ color: '#3d5060' }}>AI Voice Receptionist Platform</p>
             </div>
@@ -135,7 +135,7 @@ export default function SignupPage() {
             <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full mb-6"
               style={{ background: 'rgba(34,197,94,0.1)', border: '1px solid rgba(34,197,94,0.2)' }}>
               <Zap className="w-3.5 h-3.5" style={{ color: '#4ade80' }} />
-              <span className="text-[11px] font-semibold" style={{ color: '#4ade80' }}>Join 500+ auto shops today</span>
+              <span className="text-[11px] font-semibold" style={{ color: '#4ade80' }}>Join 500+ businesses today</span>
             </div>
 
             <h2 className="text-[36px] font-bold leading-[1.15] tracking-tight mb-4" style={{ color: '#f1f5f9' }}>
@@ -201,7 +201,7 @@ export default function SignupPage() {
             <Mic className="w-5 h-5 text-white" />
           </div>
           <span className="text-[20px] font-bold tracking-tight" style={{ color: '#f1f5f9' }}>
-            CarBot <span style={{ color: '#4ade80' }}>AI</span>
+            VoiceDesk
           </span>
         </div>
 
@@ -241,7 +241,7 @@ export default function SignupPage() {
             <p className="text-[13px] mb-6" style={{ color: '#4b6070' }}>Free to start — bring your own OpenAI key</p>
 
             <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-              <Input label="Business Name" type="text" placeholder="Premier Auto Repair" error={errors.business_name?.message} {...register('business_name')} />
+              <Input label="Business Name" type="text" placeholder="Your Business Name" error={errors.business_name?.message} {...register('business_name')} />
               <Input label="Email address" type="email" placeholder="you@example.com" error={errors.email?.message} {...register('email')} />
               <div className="relative">
                 <Input label="Password" type={showPassword ? 'text' : 'password'} placeholder="At least 8 characters" error={errors.password?.message} {...register('password')} />

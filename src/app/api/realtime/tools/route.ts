@@ -111,9 +111,7 @@ export async function POST(req: NextRequest) {
           customer_name: string;
           customer_phone?: string;
           customer_email?: string;
-          vehicle_year?: string;
-          vehicle_make?: string;
-          vehicle_model?: string;
+          custom_fields?: Record<string, unknown>;
           service_id?: string;
           scheduled_at: string;
           notes?: string;
@@ -133,9 +131,7 @@ export async function POST(req: NextRequest) {
             customer_name: args.customer_name,
             customer_phone: args.customer_phone || null,
             customer_email: args.customer_email || null,
-            vehicle_year: args.vehicle_year || null,
-            vehicle_make: args.vehicle_make || null,
-            vehicle_model: args.vehicle_model || null,
+            custom_fields: args.custom_fields || null,
             scheduled_at: args.scheduled_at,
             notes: args.notes || null,
             status: 'confirmed' as const,
@@ -180,9 +176,7 @@ export async function POST(req: NextRequest) {
           name: string;
           phone: string;
           email?: string;
-          vehicle_year?: string;
-          vehicle_make?: string;
-          vehicle_model?: string;
+          custom_fields?: Record<string, unknown>;
           service_interest?: string;
           notes?: string;
         };
@@ -200,9 +194,7 @@ export async function POST(req: NextRequest) {
             name: args.name,
             phone: args.phone || null,
             email: args.email || null,
-            vehicle_year: args.vehicle_year || null,
-            vehicle_make: args.vehicle_make || null,
-            vehicle_model: args.vehicle_model || null,
+            custom_fields: args.custom_fields || null,
             service_interest: args.service_interest || null,
             notes: args.notes || null,
             status: 'new' as const,
