@@ -147,9 +147,17 @@ export function buildSystemPrompt(
   language = 'en',
   greetingMessage?: string | null
 ): string {
-  const langInstruction = language === 'en'
-    ? 'LANGUAGE REQUIREMENT: Start by asking the customer to choose between English or Arabic. After they choose, respond ONLY in their chosen language for the entire conversation.'
-    : `LANGUAGE REQUIREMENT: Start by asking the customer to choose between English or Arabic. After they choose, respond ONLY in their chosen language for the entire conversation. Default language preference: ${language}.`;
+  // Only add language/greeting instructions if the agent's own prompt doesn't
+  // already cover them — avoids redundant directives that cause greeting loops.
+  const agentHasLanguageInstructions = agentSystemPrompt
+    ? /language\s*selection|bilingual\s*greeting|choose\s*(between\s*)?(english|arabic)/i.test(agentSystemPrompt)
+    : false;
+
+  const langInstruction = agentHasLanguageInstructions
+    ? '' // Agent prompt already handles language selection
+    : language === 'en'
+      ? 'LANGUAGE REQUIREMENT: Start by asking the customer to choose between English or Arabic. After they choose, respond ONLY in their chosen language for the entire conversation.'
+      : `LANGUAGE REQUIREMENT: Start by asking the customer to choose between English or Arabic. After they choose, respond ONLY in their chosen language for the entire conversation. Default language preference: ${language}.`;
 
   const servicesText = services.length > 0
     ? services.map((s) => `- ${s.name}: ${formatPrice(s.price_min, s.price_max, s.price_type)}, ${s.duration_minutes} minutes`).join('\n')
@@ -164,13 +172,19 @@ export function buildSystemPrompt(
     ? faqs.map((f) => `Q: ${f.question}\nA: ${f.answer}`).join('\n\n')
     : '';
 
-  const greetingInstruction = greetingMessage
-    ? `OPENING GREETING: When the call starts, your very first response MUST be exactly: "${greetingMessage}"`
-    : `OPENING GREETING: When the call starts, greet the caller and ask them to choose a language. Example: "Hello! Thank you for calling ${business.name}. Which language would you prefer? English or Arabic?"`;
+  // Greeting is sent to Deepgram as the `agent.greeting` field, so the LLM
+  // should NOT be told to repeat it. Just instruct to move forward after greeting.
+  const greetingInstruction = agentHasLanguageInstructions
+    ? 'GREETING: A bilingual greeting is played automatically. After the greeting, immediately proceed to help the caller. Do NOT repeat the greeting or re-ask for language preference.'
+    : greetingMessage
+      ? `GREETING: A greeting is played automatically. After it, proceed to help the caller. Do NOT repeat the greeting.`
+      : `GREETING: Greet the caller briefly, then ask how you can help. Do NOT repeat the greeting.`;
 
-  return `${langInstruction}
+  const languageRules = agentHasLanguageInstructions
+    ? '- After the customer selects a language, speak ONLY in their chosen language — never re-ask for language preference'
+    : '- Start by asking the customer to choose between English or Arabic\n- After language selection, speak ONLY in the customer\'s chosen language';
 
-${greetingInstruction}
+  return `${langInstruction ? langInstruction + '\n\n' : ''}${greetingInstruction}
 
 ${agentSystemPrompt || ''}
 
@@ -191,8 +205,7 @@ ${hoursText}
 ${faqsText ? `FREQUENTLY ASKED QUESTIONS:\n${faqsText}` : ''}
 
 IMPORTANT RULES:
-- ALWAYS start by asking the customer to choose between English or Arabic
-- After language selection, speak ONLY in the customer's chosen language
+${languageRules}
 - Always collect customer name and phone before booking
 - Always use the available tools to check slots before confirming times
 - Never make up pricing - use the getServices tool for accurate pricing
