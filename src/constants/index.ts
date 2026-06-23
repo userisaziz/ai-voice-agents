@@ -77,6 +77,12 @@ export const TIMEZONES = [
   'America/Anchorage',
   'Pacific/Honolulu',
   'America/Puerto_Rico',
+  'Asia/Riyadh',
+  'Asia/Dubai',
+  'Asia/Qatar',
+  'Asia/Kuwait',
+  'Asia/Baghdad',
+  'Africa/Cairo',
 ];
 
 export const DEFAULT_GREETING =
@@ -198,7 +204,8 @@ export const ANALYTICS_EVENT_TYPES = {
 export const TELEPHONY_PROVIDERS = [
   { value: 'twilio', label: 'Twilio', description: 'Industry standard telephony API' },
   { value: 'vapi', label: 'Vapi', description: 'AI-native voice platform' },
-  { value: 'vobiz', label: 'Vobiz', description: 'Business voice solutions' },
+  { value: 'vobiz', label: 'Vobiz', description: 'Business voice solutions with SIP trunking' },
+  { value: 'sip', label: 'SIP Trunk', description: 'Direct SIP trunk integration (any provider)' },
 ] as const;
 
 export const CALL_DIRECTIONS = [
