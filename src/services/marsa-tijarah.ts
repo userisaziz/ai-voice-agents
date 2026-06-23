@@ -136,7 +136,21 @@ export async function searchProducts(args: {
     }
   }
 
-  return { products: products.slice(0, limit), total: products.length };
+  // Return only essential fields to keep tool responses small for the AI agent
+  const trimmed = products.slice(0, limit).map((p) => ({
+    id: p.id,
+    name_en: p.name_en,
+    name_ar: p.name_ar,
+    price: p.price,
+    price_unit: p.price_unit,
+    min_order_qty: p.min_order_qty,
+    stock_status: p.stock_status,
+    rating: p.rating,
+    seller_id: p.seller_id,
+    slug: p.slug,
+  }));
+
+  return { products: trimmed, total: products.length };
 }
 
 // ── Get Categories ─────────────────────────────────────────────────────
@@ -151,7 +165,15 @@ export async function getCategories(): Promise<{ categories: Category[] }> {
   }
 
   const categories: Category[] = await res.json();
-  return { categories };
+  // Return only essential fields to keep tool responses small
+  const trimmed = categories.map((c) => ({
+    id: c.id,
+    name_en: c.name_en,
+    name_ar: c.name_ar,
+    slug: c.slug,
+    product_count: c.product_count,
+  }));
+  return { categories: trimmed };
 }
 
 // ── Get Top Sellers ────────────────────────────────────────────────────
@@ -171,5 +193,16 @@ export async function getTopSellers(args?: {
   }
 
   const sellers: Seller[] = await res.json();
-  return { sellers };
+  // Return only essential fields to keep tool responses small
+  const trimmed = sellers.map((s) => ({
+    id: s.id,
+    company_name_en: s.company_name_en,
+    company_name_ar: s.company_name_ar,
+    rating: s.rating,
+    review_count: s.review_count,
+    is_premium: s.is_premium,
+    city: s.city,
+    region: s.region,
+  }));
+  return { sellers: trimmed };
 }

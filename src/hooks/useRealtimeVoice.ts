@@ -209,11 +209,39 @@ export function useRealtimeVoice({ businessId, agentId, onConversationEnd }: Use
               }),
             });
             const { result } = await toolRes.json();
+
+            // Guard: Deepgram crashes if FunctionCallResponse content is too large.
+            // Cap at 4 KB — trim product/seller arrays if needed.
+            const MAX_CONTENT_BYTES = 4096;
+            let contentStr = JSON.stringify(result);
+            if (contentStr.length > MAX_CONTENT_BYTES) {
+              // Progressively trim: reduce array items, then truncate
+              const trimmed = { ...result };
+              if (Array.isArray(trimmed.products)) {
+                trimmed.products = trimmed.products.slice(0, 3).map((p: Record<string, unknown>) => ({
+                  name_en: p.name_en, name_ar: p.name_ar, price: p.price, price_unit: p.price_unit,
+                }));
+                trimmed.total = result.total;
+                trimmed.message = `Showing top 3 of ${result.total} results (summarized for voice).`;
+              }
+              if (Array.isArray(trimmed.sellers)) {
+                trimmed.sellers = trimmed.sellers.slice(0, 3);
+              }
+              if (Array.isArray(trimmed.categories)) {
+                trimmed.categories = trimmed.categories.slice(0, 5);
+              }
+              contentStr = JSON.stringify(trimmed);
+              // Final hard truncation if still too large
+              if (contentStr.length > MAX_CONTENT_BYTES) {
+                contentStr = contentStr.slice(0, MAX_CONTENT_BYTES - 20) + '...(truncated)';
+              }
+            }
+
             connection.sendFunctionCallResponse({
               type: 'FunctionCallResponse',
               id: fn.function_call_id,
               name: fn.function_name,
-              content: JSON.stringify(result),
+              content: contentStr,
             });
           } catch (err) {
             console.error('Function call failed:', err);
