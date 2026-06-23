@@ -112,7 +112,7 @@ export async function POST(req: NextRequest) {
       const agentVoice = agentTyped?.voice || 'aura-2-thalia-en';
       
       // Map voice to language-appropriate TTS model
-      let ttsModel = agentVoice;
+      let ttsModel: string = agentVoice;
       if (agentVoice === 'alloy' || !agentVoice.startsWith('aura-')) {
         // Use multilingual default based on language
         // Note: For Arabic, we fallback to English TTS as Deepgram Aura doesn't support Arabic natively yet
