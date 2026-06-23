@@ -14,7 +14,11 @@ export const businessSchema = z.object({
 
 export const agentSchema = z.object({
   name: z.string().min(2, 'Agent name must be at least 2 characters').max(100),
-  voice: z.enum(['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer']),
+  voice: z.enum([
+    'alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer',
+    'aura-2-thalia-en', 'aura-2-zeus-en', 'aura-2-hera-en',
+    'aura-2-apollo-en', 'aura-2-arcas-en',
+  ]),
   language: z.string().default('en'),
   personality: z.enum(['professional', 'friendly', 'formal', 'casual']),
   greeting_message: z.string().max(500).optional().or(z.literal('')),

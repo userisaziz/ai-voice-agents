@@ -34,7 +34,7 @@ export interface Agent {
   updated_at: string;
 }
 
-export type AgentVoice = 'alloy' | 'echo' | 'fable' | 'onyx' | 'nova' | 'shimmer' | 'aura-2-thalia-en' | 'aura-2-zeus-en' | 'aura-2-hera-en';
+export type AgentVoice = 'alloy' | 'echo' | 'fable' | 'onyx' | 'nova' | 'shimmer' | 'aura-2-thalia-en' | 'aura-2-zeus-en' | 'aura-2-hera-en' | 'aura-2-apollo-en' | 'aura-2-arcas-en';
 export type AgentPersonality = 'professional' | 'friendly' | 'formal' | 'casual';
 export type InterruptSensitivity = 'low' | 'medium' | 'high';
 
