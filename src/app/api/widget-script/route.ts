@@ -542,13 +542,13 @@ export async function GET(_req: NextRequest) {
             output: { encoding: 'linear16', sample_rate: 24000, container: 'none' },
           },
           agent: {
-            listen: { provider: { version: 'v1', type: 'deepgram', model: 'nova-3-general-en' } },
+            listen: { provider: { type: 'deepgram', model: 'flux-general-en' } },
             think: {
               provider: { type: 'open_ai', model: 'gpt-4o-mini' },
               prompt: sessionData.systemPrompt,
               functions: sessionData.functions || sessionData.tools || [],
             },
-            speak: { provider: { type: 'deepgram', model: 'aura-2-thalia-en' } },
+            speak: { provider: { type: 'deepgram', model: sessionData.ttsModel || 'aura-2-thalia-en' } },
             greeting: sessionData.greeting || 'Hello! How can I help you today?',
           },
         }));
