@@ -282,7 +282,8 @@ export function useRealtimeVoice({ businessId, agentId, onConversationEnd }: Use
       case 'Welcome': {
         console.log('[Deepgram] Welcome received, sending settings');
         const { greeting, systemPrompt, ttsModel, language } = sessionConfigRef.current;
-        const sttModel = process.env.NEXT_PUBLIC_DEEPGRAM_STT_MODEL || 'flux-general-en';
+        const baseSttModel = process.env.NEXT_PUBLIC_DEEPGRAM_STT_MODEL || 'flux-general-en';
+        const sttModel = language === 'ar' ? 'flux-general-multi' : baseSttModel;
         const fallbackTtsModel = ttsModel || process.env.NEXT_PUBLIC_DEEPGRAM_TTS_MODEL || 'aura-2-thalia-en';
 
         // ElevenLabs primary + Deepgram Aura fallback
