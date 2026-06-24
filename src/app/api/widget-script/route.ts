@@ -556,13 +556,24 @@ export async function GET(_req: NextRequest) {
 
       /* Store config for Settings message */
       var agentConfig = {
-        listen: { model: sttModel },
+        listen: { 
+          provider: {
+            type: 'deepgram',
+            model: sttModel,
+            language: sessionData.language === 'ar' ? 'ar' : 'en',
+          }
+        },
         think: {
           provider: { type: 'open_ai', model: 'gpt-4o-mini' },
           prompt: sessionData.systemPrompt,
           functions: sessionData.functions || sessionData.tools || [],
         },
-        speak: { model: sessionData.ttsModel || 'aura-2-thalia-en' },
+        speak: { 
+          provider: {
+            type: 'deepgram',
+            model: sessionData.ttsModel || 'aura-2-thalia-en',
+          }
+        },
         greeting: sessionData.greeting || 'Hello! How can I help you today?',
       };
       
