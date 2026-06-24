@@ -74,10 +74,12 @@ export async function GET(_req: NextRequest) {
     ring2.className = 'voicedesk-ring2';
     ring2.style.background = color;
 
-    /* tooltip */
+    /* tooltip (hidden by default, shown on hover) */
     var tip = document.createElement('div');
     tip.className = 'voicedesk-tooltip';
     tip.textContent = config._mode === 'chat' ? 'Chat with us' : 'Talk to AI';
+    tip.style.opacity = '0';
+    tip.style.pointerEvents = 'none';
 
     /* button */
     fabEl = document.createElement('button');
@@ -89,6 +91,14 @@ export async function GET(_req: NextRequest) {
       fabEl.innerHTML = '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07A19.5 19.5 0 014.71 13 19.79 19.79 0 011.65 4.4a2 2 0 011.99-2.19h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L7.91 9.91a16 16 0 006.29 6.29l1.77-1.77a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z"/></svg>';
     }
     fabEl.addEventListener('click', function() { openWidget(cfg, color, pos); });
+    fabEl.addEventListener('mouseenter', function() {
+      tip.style.opacity = '1';
+      tip.style.transform = 'translateY(0)';
+    });
+    fabEl.addEventListener('mouseleave', function() {
+      tip.style.opacity = '0';
+      tip.style.transform = 'translateY(4px)';
+    });
 
     wrap.appendChild(ring1);
     wrap.appendChild(ring2);
@@ -947,8 +957,8 @@ export async function GET(_req: NextRequest) {
       /* Rings */
       '.voicedesk-ring1,.voicedesk-ring2{position:absolute;width:56px;height:56px;border-radius:50%;pointer-events:none;will-change:transform,opacity}',
 
-      /* Tooltip */
-      '.voicedesk-tooltip{position:absolute;bottom:calc(100% + 10px);right:0;background:rgba(8,14,16,.95);border:1px solid rgba(255,255,255,.1);color:#e2e8f0;font-size:11px;font-weight:600;white-space:nowrap;padding:5px 10px;border-radius:8px;pointer-events:none;font-family:Inter,system-ui,sans-serif;box-shadow:0 4px 16px rgba(0,0,0,.4)}',
+      /* Tooltip (hidden by default, shown on FAB hover) */
+      '.voicedesk-tooltip{position:absolute;bottom:calc(100% + 10px);right:0;background:rgba(8,14,16,.95);border:1px solid rgba(255,255,255,.1);color:#e2e8f0;font-size:11px;font-weight:600;white-space:nowrap;padding:5px 10px;border-radius:8px;pointer-events:none;font-family:Inter,system-ui,sans-serif;box-shadow:0 4px 16px rgba(0,0,0,.4);opacity:0;transform:translateY(4px);transition:opacity .2s ease,transform .2s ease}',
       '.voicedesk-tooltip::after{content:"";position:absolute;top:100%;right:14px;border:4px solid transparent;border-top-color:rgba(255,255,255,.1)}',
 
       /* FAB button */
