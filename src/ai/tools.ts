@@ -184,9 +184,20 @@ export function buildSystemPrompt(
     ? '- After the customer selects a language, speak ONLY in their chosen language — never re-ask for language preference'
     : '- Start by asking the customer to choose between English or Arabic\n- After language selection, speak ONLY in the customer\'s chosen language';
 
+  // When a greeting is configured via Deepgram's agent.greeting field, it plays
+  // automatically as audio. Strip any lines from the agent prompt that would
+  // cause the LLM to regenerate it (prevents greeting loops).
+  let processedAgentPrompt = agentSystemPrompt || '';
+  if (greetingMessage && processedAgentPrompt) {
+    processedAgentPrompt = processedAgentPrompt
+      .split('\n')
+      .filter((line) => !/^[-•]\s*(Start with a|Generate a|Say a|Deliver a).*(greeting|welcome)/i.test(line.trim()))
+      .join('\n');
+  }
+
   return `${langInstruction ? langInstruction + '\n\n' : ''}${greetingInstruction}
 
-${agentSystemPrompt || ''}
+${processedAgentPrompt}
 
 BUSINESS INFORMATION:
 Business Name: ${business.name}

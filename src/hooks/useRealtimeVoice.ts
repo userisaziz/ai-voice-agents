@@ -196,6 +196,7 @@ export function useRealtimeVoice({ businessId, agentId, onConversationEnd }: Use
 
       case 'FunctionCallRequest': {
         const fn = data as unknown as { function_name: string; input: Record<string, unknown>; function_call_id: string };
+        console.log('[Tool] FunctionCallRequest:', fn.function_name, fn.input);
         (async () => {
           try {
             const toolRes = await fetch('/api/realtime/tools', {
@@ -209,34 +210,56 @@ export function useRealtimeVoice({ businessId, agentId, onConversationEnd }: Use
               }),
             });
             const { result } = await toolRes.json();
-
-            // Guard: Deepgram crashes if FunctionCallResponse content is too large.
-            // Cap at 4 KB — trim product/seller arrays if needed.
-            const MAX_CONTENT_BYTES = 4096;
             let contentStr = JSON.stringify(result);
+            console.log('[Tool] Raw response size:', contentStr.length, 'bytes');
+
+            // Deepgram crashes the agent session if FunctionCallResponse content
+            // exceeds ~2 KB. Always trim aggressively — don't rely on server-side.
+            const MAX_CONTENT_BYTES = 2048;
             if (contentStr.length > MAX_CONTENT_BYTES) {
-              // Progressively trim: reduce array items, then truncate
-              const trimmed = { ...result };
-              if (Array.isArray(trimmed.products)) {
-                trimmed.products = trimmed.products.slice(0, 3).map((p: Record<string, unknown>) => ({
-                  name_en: p.name_en, name_ar: p.name_ar, price: p.price, price_unit: p.price_unit,
+              const trimmed: Record<string, unknown> = {};
+              // Keep metadata
+              trimmed.query = result.query;
+              trimmed.total = result.total;
+              trimmed.message = result.message;
+
+              // Reduce arrays to minimal voice-friendly format
+              if (Array.isArray(result.products)) {
+                trimmed.products = (result.products as Record<string, unknown>[]).slice(0, 3).map((p) => ({
+                  name: p.name_en || p.name_ar,
+                  price: p.price,
+                  price_unit: p.price_unit,
                 }));
-                trimmed.total = result.total;
-                trimmed.message = `Showing top 3 of ${result.total} results (summarized for voice).`;
               }
-              if (Array.isArray(trimmed.sellers)) {
-                trimmed.sellers = trimmed.sellers.slice(0, 3);
+              if (Array.isArray(result.sellers)) {
+                trimmed.sellers = (result.sellers as Record<string, unknown>[]).slice(0, 2).map((s) => ({
+                  name: s.company_name_en || s.company_name_ar,
+                  rating: s.rating,
+                }));
               }
-              if (Array.isArray(trimmed.categories)) {
-                trimmed.categories = trimmed.categories.slice(0, 5);
+              if (Array.isArray(result.categories)) {
+                trimmed.categories = (result.categories as Record<string, unknown>[]).slice(0, 5).map((c) => ({
+                  name: c.name_en || c.name_ar,
+                }));
               }
+              // Pass through non-array fields (appointment, lead, etc.)
+              for (const [k, v] of Object.entries(result)) {
+                if (!['products', 'sellers', 'categories', 'query', 'total', 'message'].includes(k)) {
+                  trimmed[k] = v;
+                }
+              }
+
               contentStr = JSON.stringify(trimmed);
+              console.log('[Tool] Trimmed response size:', contentStr.length, 'bytes');
+
               // Final hard truncation if still too large
               if (contentStr.length > MAX_CONTENT_BYTES) {
                 contentStr = contentStr.slice(0, MAX_CONTENT_BYTES - 20) + '...(truncated)';
+                console.log('[Tool] Hard truncated to', MAX_CONTENT_BYTES, 'bytes');
               }
             }
 
+            console.log('[Tool] Sending FunctionCallResponse for:', fn.function_name);
             connection.sendFunctionCallResponse({
               type: 'FunctionCallResponse',
               id: fn.function_call_id,
@@ -244,7 +267,7 @@ export function useRealtimeVoice({ businessId, agentId, onConversationEnd }: Use
               content: contentStr,
             });
           } catch (err) {
-            console.error('Function call failed:', err);
+            console.error('[Tool] Function call failed:', err);
             connection.sendFunctionCallResponse({
               type: 'FunctionCallResponse',
               id: fn.function_call_id,
