@@ -539,13 +539,13 @@ export async function GET(_req: NextRequest) {
       var apiKey = await keyRes.text();
 
       /* Phase 3: open WebSocket to Deepgram Voice Agent
-       * The Agent API accepts all config via query parameters.
-       * Agent auto-plays greeting, then sends SettingsApplied event.
-       * We MUST wait for SettingsApplied before sending microphone audio. */
+       * Connect with API key via Authorization header (subprotocol).
+       * Send agent config as Settings message after connection.
+       * Wait for SettingsApplied before sending microphone audio. */
       var region = 'agent';
       try {
         var envRegion = '${process.env.NEXT_PUBLIC_DEEPGRAM_REGION || 'us'}';
-        if (envRegion === 'eu') region = 'agent.eu';
+        if (envRegion === 'eu') region = 'api.eu';
       } catch(_) {}
 
       /* Select multilingual STT model based on agent language */
@@ -553,28 +553,37 @@ export async function GET(_req: NextRequest) {
       if (sessionData.language === 'ar') {
         sttModel = 'flux-general-multi';
       }
+
+      /* Store config for Settings message */
+      var agentConfig = {
+        listen: { model: sttModel },
+        think: {
+          provider: { type: 'open_ai', model: 'gpt-4o-mini' },
+          prompt: sessionData.systemPrompt,
+          functions: sessionData.functions || sessionData.tools || [],
+        },
+        speak: { model: sessionData.ttsModel || 'aura-2-thalia-en' },
+        greeting: sessionData.greeting || 'Hello! How can I help you today?',
+      };
       
-      var wsUrl = 'wss://' + region + '.deepgram.com/v1/agent/converse'
-        + '?key=' + encodeURIComponent(apiKey.trim())
-        + '&agent=' + encodeURIComponent(JSON.stringify({
-            listen: { model: sttModel },
-            think: {
-              provider: { type: 'open_ai', model: 'gpt-4o-mini' },
-              prompt: sessionData.systemPrompt,
-              functions: sessionData.functions || sessionData.tools || [],
-            },
-            speak: { model: sessionData.ttsModel || 'aura-2-thalia-en' },
-            greeting: sessionData.greeting || 'Hello! How can I help you today?',
-          }));
+      var wsUrl = 'wss://' + region + '.deepgram.com/v1/agent/converse';
       
-      ws = new WebSocket(wsUrl);
+      ws = new WebSocket(wsUrl, ['token', apiKey.trim()]);
       ws.binaryType = 'arraybuffer';
 
       var settingsReceived = false;
 
       ws.onopen = function() {
         socketOpen = true;
-        /* DO NOT send audio yet — wait for SettingsApplied event. */
+        /* Send agent configuration as Settings message */
+        ws.send(JSON.stringify({
+          type: 'Settings',
+          audio: {
+            input: { encoding: 'linear16', sample_rate: 16000 },
+            output: { encoding: 'linear16', sample_rate: 24000, container: 'none' },
+          },
+          agent: agentConfig,
+        }));
       };
 
       ws.onmessage = function(e) {
