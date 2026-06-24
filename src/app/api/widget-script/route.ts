@@ -528,30 +528,37 @@ export async function GET(_req: NextRequest) {
       if (!keyRes.ok) throw new Error('Failed to get API key');
       var apiKey = await keyRes.text();
 
-      /* Phase 3: open WebSocket to Deepgram Voice Agent */
-      ws = new WebSocket('wss://agent.deepgram.com/v1/agent/converse', ['token', apiKey.trim()]);
-      ws.binaryType = 'arraybuffer';
-
-      ws.onopen = function() {
-        socketOpen = true;
-        /* Send agent settings */
-        ws.send(JSON.stringify({
-          type: 'Settings',
-          audio: {
-            input: { encoding: 'linear16', sample_rate: 16000 },
-            output: { encoding: 'linear16', sample_rate: 24000, container: 'none' },
-          },
-          agent: {
-            listen: { provider: { type: 'deepgram', model: 'flux-general-en' } },
+      /* Phase 3: open WebSocket to Deepgram Voice Agent
+       * The Agent API accepts config via query params, not Settings messages.
+       * We send audio immediately — the agent auto-plays its greeting. */
+      var region = 'agent';
+      try {
+        var envRegion = '${process.env.NEXT_PUBLIC_DEEPGRAM_REGION || 'us'}';
+        if (envRegion === 'eu') region = 'agent.eu';
+      } catch(_) {}
+      
+      var wsUrl = 'wss://' + region + '.deepgram.com/v1/agent/converse'
+        + '?key=' + encodeURIComponent(apiKey.trim())
+        + '&agent=' + encodeURIComponent(JSON.stringify({
+            listen: { model: 'flux-general-en' },
             think: {
               provider: { type: 'open_ai', model: 'gpt-4o-mini' },
               prompt: sessionData.systemPrompt,
               functions: sessionData.functions || sessionData.tools || [],
             },
-            speak: { provider: { type: 'deepgram', model: sessionData.ttsModel || 'aura-2-thalia-en' } },
+            speak: { model: sessionData.ttsModel || 'aura-2-thalia-en' },
             greeting: sessionData.greeting || 'Hello! How can I help you today?',
-          },
-        }));
+          }))
+        + '&input.encoding=linear16&input.sample_rate=16000'
+        + '&output.encoding=linear16&output.sample_rate=24000&output.container=none';
+      
+      ws = new WebSocket(wsUrl);
+      ws.binaryType = 'arraybuffer';
+
+      ws.onopen = function() {
+        socketOpen = true;
+        /* NO Settings message — Agent API doesn't accept it.
+         * Agent auto-plays greeting, then listens. */
 
         /* Flush queued mic frames */
         for (var i = 0; i < audioQueue.length; i++) ws.send(audioQueue[i]);
