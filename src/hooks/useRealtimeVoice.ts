@@ -327,9 +327,9 @@ export function useRealtimeVoice({ businessId, agentId, onConversationEnd }: Use
             listen: {
               provider: {
                 type: 'deepgram',
-                version: 'v2' as const,
                 model: sttModel,
-              },
+                language: language === 'ar' ? 'ar' : 'en',
+              } as any,
             },
             think: {
               provider: { type: 'open_ai', model: 'gpt-4o-mini' },
