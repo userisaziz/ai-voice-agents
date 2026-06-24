@@ -529,18 +529,25 @@ export async function GET(_req: NextRequest) {
       var apiKey = await keyRes.text();
 
       /* Phase 3: open WebSocket to Deepgram Voice Agent
-       * The Agent API accepts config via query params, not Settings messages.
-       * We send audio immediately — the agent auto-plays its greeting. */
+       * The Agent API accepts all config via query parameters.
+       * Agent auto-plays greeting, then sends SettingsApplied event.
+       * We MUST wait for SettingsApplied before sending microphone audio. */
       var region = 'agent';
       try {
         var envRegion = '${process.env.NEXT_PUBLIC_DEEPGRAM_REGION || 'us'}';
         if (envRegion === 'eu') region = 'agent.eu';
       } catch(_) {}
+
+      /* Select multilingual STT model based on agent language */
+      var sttModel = 'flux-general-en';
+      if (sessionData.language === 'ar') {
+        sttModel = 'flux-general-multi';
+      }
       
       var wsUrl = 'wss://' + region + '.deepgram.com/v1/agent/converse'
         + '?key=' + encodeURIComponent(apiKey.trim())
         + '&agent=' + encodeURIComponent(JSON.stringify({
-            listen: { model: 'flux-general-en' },
+            listen: { model: sttModel },
             think: {
               provider: { type: 'open_ai', model: 'gpt-4o-mini' },
               prompt: sessionData.systemPrompt,
@@ -548,26 +555,16 @@ export async function GET(_req: NextRequest) {
             },
             speak: { model: sessionData.ttsModel || 'aura-2-thalia-en' },
             greeting: sessionData.greeting || 'Hello! How can I help you today?',
-          }))
-        + '&input.encoding=linear16&input.sample_rate=16000'
-        + '&output.encoding=linear16&output.sample_rate=24000&output.container=none';
+          }));
       
       ws = new WebSocket(wsUrl);
       ws.binaryType = 'arraybuffer';
 
+      var settingsReceived = false;
+
       ws.onopen = function() {
         socketOpen = true;
-        /* NO Settings message — Agent API doesn't accept it.
-         * Agent auto-plays greeting, then listens. */
-
-        /* Flush queued mic frames */
-        for (var i = 0; i < audioQueue.length; i++) ws.send(audioQueue[i]);
-        audioQueue = [];
-
-        callStartTime = Date.now();
-        muted = false;
-        showActive();
-        setCallState('listening');
+        /* DO NOT send audio yet — wait for SettingsApplied event. */
       };
 
       ws.onmessage = function(e) {
@@ -599,8 +596,10 @@ export async function GET(_req: NextRequest) {
       playbackContext = new AudioContext({ sampleRate: 24000 });
       playbackNode = await setupPlayback(playbackContext);
       await setupMic(micContext, localStream, function(buf) {
-        if (socketOpen && ws && ws.readyState === 1) {
+        if (socketOpen && ws && ws.readyState === 1 && settingsReceived && !muted) {
           ws.send(buf);
+        } else if (socketOpen && ws && ws.readyState === 1 && settingsReceived && muted) {
+          /* muted — discard */
         } else {
           audioQueue.push(buf);
         }
@@ -728,6 +727,14 @@ export async function GET(_req: NextRequest) {
 
       case 'SettingsApplied':
         console.log('[VoiceDesk] Settings applied');
+        settingsReceived = true;
+        /* NOW safe to send microphone audio */
+        for (var i = 0; i < audioQueue.length; i++) ws.send(audioQueue[i]);
+        audioQueue = [];
+        callStartTime = Date.now();
+        muted = false;
+        showActive();
+        setCallState('listening');
         break;
 
       case 'Error':
