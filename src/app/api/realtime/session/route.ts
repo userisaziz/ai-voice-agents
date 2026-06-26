@@ -153,6 +153,7 @@ export async function POST(req: NextRequest) {
         tools: REALTIME_TOOLS,       // OpenAI format (legacy)
         functions: DEEPGRAM_FUNCTIONS, // Deepgram format
         greeting,
+        apiKey: process.env.DEEPGRAM_API_KEY,
         turnDetection: {
           type: 'server_vad',
           threshold: sensitivity === 'low' ? 0.9 : sensitivity === 'high' ? 0.5 : 0.7,
