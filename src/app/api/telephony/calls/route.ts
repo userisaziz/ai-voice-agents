@@ -3,6 +3,8 @@ import { createClient } from '@/lib/supabase/server';
 import { createAdminSupabase } from '@/lib/supabase/admin';
 import { getCallLogs, getCallLogStats } from '@/services/call-logs';
 
+export const dynamic = 'force-dynamic';
+
 async function getBusinessId(userId: string): Promise<string | null> {
   const supabase = createAdminSupabase();
   const { data: business } = await supabase
