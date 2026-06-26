@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminSupabase } from '@/lib/supabase/admin';
 import { buildSystemPrompt, DEEPGRAM_FUNCTIONS, REALTIME_TOOLS } from '@/ai/tools';
+import { hybridSearch, formatSearchContext } from '@/lib/rag/search';
 import type { Business, Agent, Service, BusinessHours } from '@/types';
 
 const CORS = {
@@ -73,6 +74,19 @@ export async function POST(req: NextRequest) {
 
       const agentTyped = agent as Agent | null;
 
+      // Pre-fetch RAG context for the voice session using business name as query
+      let ragContext = '';
+      try {
+        const ragResults = await hybridSearch(
+          `${business.name} services products policies`,
+          businessId,
+          3
+        );
+        ragContext = formatSearchContext(ragResults);
+      } catch (ragErr) {
+        console.warn('[Session] RAG pre-fetch failed (non-fatal):', ragErr);
+      }
+
       const systemPrompt = buildSystemPrompt(
         business as Business,
         (services || []) as Service[],
@@ -80,7 +94,8 @@ export async function POST(req: NextRequest) {
         agentTyped?.system_prompt || null,
         (faqs || []) as Array<{ question: string; answer: string }>,
         agentTyped?.language || 'en',
-        agentTyped?.greeting_message || null
+        agentTyped?.greeting_message || null,
+        ragContext || undefined
       );
 
       const { data: conversation } = await supabase
@@ -138,6 +153,7 @@ export async function POST(req: NextRequest) {
         tools: REALTIME_TOOLS,       // OpenAI format (legacy)
         functions: DEEPGRAM_FUNCTIONS, // Deepgram format
         greeting,
+        apiKey: process.env.DEEPGRAM_API_KEY,
         turnDetection: {
           type: 'server_vad',
           threshold: sensitivity === 'low' ? 0.9 : sensitivity === 'high' ? 0.5 : 0.7,

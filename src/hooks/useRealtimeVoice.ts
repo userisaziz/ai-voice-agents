@@ -1,7 +1,6 @@
 'use client';
 
 import { useRef, useCallback, useEffect } from 'react';
-import { DeepgramClient } from '@deepgram/sdk';
 import { useVoiceStore } from '@/store/voice';
 import { DEEPGRAM_FUNCTIONS } from '@/ai/tools';
 
@@ -11,9 +10,7 @@ interface UseRealtimeVoiceOptions {
   onConversationEnd?: (conversationId: string) => void;
 }
 
-type DGConnection = Awaited<ReturnType<InstanceType<typeof DeepgramClient>['agent']['v1']['connect']>>;
-
-interface MessageTypes {
+interface DgEvent {
   type: string;
   [key: string]: unknown;
 }
@@ -30,7 +27,7 @@ export function useRealtimeVoice({ businessId, agentId, onConversationEnd }: Use
     conversationId,
   } = useVoiceStore();
 
-  const connectionRef = useRef<DGConnection | null>(null);
+  const wsRef = useRef<WebSocket | null>(null);
   const socketOpenRef = useRef(false);
   const settingsAppliedRef = useRef(false);
   const audioQueueRef = useRef<ArrayBuffer[]>([]);
@@ -43,7 +40,7 @@ export function useRealtimeVoice({ businessId, agentId, onConversationEnd }: Use
   const pendingSavesRef = useRef<Promise<unknown>[]>([]);
   const conversationIdRef = useRef<string | null>(null);
   const keepAliveRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const sessionConfigRef = useRef<{ greeting: string; systemPrompt: string; ttsModel: string; language: string }>({
+  const sessionConfigRef = useRef<{ greeting: string; systemPrompt: string; ttsModel: string; language: string; functions?: unknown[] }>({
     greeting: '',
     systemPrompt: '',
     ttsModel: '',
@@ -139,32 +136,16 @@ export function useRealtimeVoice({ businessId, agentId, onConversationEnd }: Use
     pendingSavesRef.current.push(p);
   }, []);
 
-  // ── Message type dispatcher ──────────────────────────────────────────────
-  const handleMessage = useCallback((connection: DGConnection, convId: string, msg: unknown) => {
-    // Binary audio data (ArrayBuffer or Blob)
-    if (msg instanceof ArrayBuffer) {
-      const ab = msg;
-      // Skip WAV header (44 bytes) if present, otherwise use raw PCM
-      const header = new Uint8Array(ab, 0, 4);
-      const isWav = header[0] === 0x52 && header[1] === 0x49 && header[2] === 0x46 && header[3] === 0x46; // 'RIFF'
-      const pcm = isWav ? ab.slice(44) : ab;
-      playbackNodeRef.current?.port.postMessage(pcm, [pcm]);
-      return;
+  // ── Send helper with defensive guard ────────────────────────────────────
+  const wsSend = useCallback((data: string | ArrayBuffer) => {
+    const ws = wsRef.current;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(data);
     }
+  }, []);
 
-    if (msg instanceof Blob) {
-      msg.arrayBuffer().then((ab) => {
-        const header = new Uint8Array(ab, 0, 4);
-        const isWav = header[0] === 0x52 && header[1] === 0x49 && header[2] === 0x46 && header[3] === 0x46;
-        const pcm = isWav ? ab.slice(44) : ab;
-        playbackNodeRef.current?.port.postMessage(pcm, [pcm]);
-      });
-      return;
-    }
-
-    if (typeof msg === 'string') return;
-
-    const data = msg as MessageTypes;
+  // ── Deepgram event dispatcher ───────────────────────────────────────────
+  const handleDgEvent = useCallback((convId: string, data: DgEvent) => {
     switch (data.type) {
       case 'AgentStartedSpeaking':
         setConnectionState({ status: 'speaking' });
@@ -180,8 +161,8 @@ export function useRealtimeVoice({ businessId, agentId, onConversationEnd }: Use
         break;
 
       case 'ConversationText': {
-        const ct = data as unknown as { role: string; content: string };
-        const { role, content } = ct;
+        const role = data.role as string;
+        const content = (data.content as string) || '';
         if (!content?.trim()) return;
         const entry = {
           id: `${role}-${Date.now()}`,
@@ -218,12 +199,10 @@ export function useRealtimeVoice({ businessId, agentId, onConversationEnd }: Use
             const MAX_CONTENT_BYTES = 2048;
             if (contentStr.length > MAX_CONTENT_BYTES) {
               const trimmed: Record<string, unknown> = {};
-              // Keep metadata
               trimmed.query = result.query;
               trimmed.total = result.total;
               trimmed.message = result.message;
 
-              // Reduce arrays to minimal voice-friendly format
               if (Array.isArray(result.products)) {
                 trimmed.products = (result.products as Record<string, unknown>[]).slice(0, 3).map((p) => ({
                   name: p.name_en || p.name_ar,
@@ -242,7 +221,6 @@ export function useRealtimeVoice({ businessId, agentId, onConversationEnd }: Use
                   name: c.name_en || c.name_ar,
                 }));
               }
-              // Pass through non-array fields (appointment, lead, etc.)
               for (const [k, v] of Object.entries(result)) {
                 if (!['products', 'sellers', 'categories', 'query', 'total', 'message'].includes(k)) {
                   trimmed[k] = v;
@@ -252,7 +230,6 @@ export function useRealtimeVoice({ businessId, agentId, onConversationEnd }: Use
               contentStr = JSON.stringify(trimmed);
               console.log('[Tool] Trimmed response size:', contentStr.length, 'bytes');
 
-              // Final hard truncation if still too large
               if (contentStr.length > MAX_CONTENT_BYTES) {
                 contentStr = contentStr.slice(0, MAX_CONTENT_BYTES - 20) + '...(truncated)';
                 console.log('[Tool] Hard truncated to', MAX_CONTENT_BYTES, 'bytes');
@@ -260,20 +237,20 @@ export function useRealtimeVoice({ businessId, agentId, onConversationEnd }: Use
             }
 
             console.log('[Tool] Sending FunctionCallResponse for:', fn.function_name);
-            connection.sendFunctionCallResponse({
+            wsSend(JSON.stringify({
               type: 'FunctionCallResponse',
               id: fn.function_call_id,
               name: fn.function_name,
               content: contentStr,
-            });
+            }));
           } catch (err) {
             console.error('[Tool] Function call failed:', err);
-            connection.sendFunctionCallResponse({
+            wsSend(JSON.stringify({
               type: 'FunctionCallResponse',
               id: fn.function_call_id,
               name: fn.function_name,
               content: JSON.stringify({ error: 'Function call failed' }),
-            });
+            }));
           }
         })();
         break;
@@ -281,76 +258,46 @@ export function useRealtimeVoice({ businessId, agentId, onConversationEnd }: Use
 
       case 'Welcome': {
         console.log('[Deepgram] Welcome received, sending settings');
-        const { greeting, systemPrompt, ttsModel, language } = sessionConfigRef.current;
+        const { greeting, systemPrompt, ttsModel, language, functions } = sessionConfigRef.current;
         const baseSttModel = process.env.NEXT_PUBLIC_DEEPGRAM_STT_MODEL || 'flux-general-en';
         const sttModel = language === 'ar' ? 'flux-general-multi' : baseSttModel;
-        const fallbackTtsModel = ttsModel || process.env.NEXT_PUBLIC_DEEPGRAM_TTS_MODEL || 'aura-2-thalia-en';
 
-        // ElevenLabs primary + Deepgram Aura fallback
-        const elevenLabsApiKey = process.env.NEXT_PUBLIC_ELEVEN_LABS_API_KEY || '';
-        const elevenLabsVoiceId = process.env.NEXT_PUBLIC_ELEVEN_LABS_VOICE_ID || 'pNInz6obpgDQGcFmaJgB';
-        // Use multilingual model for Arabic/English support
-        const elevenLabsModel = process.env.NEXT_PUBLIC_ELEVEN_LABS_MODEL || 'eleven_multilingual_v2';
+        const agentConfig = {
+          listen: {
+            provider: {
+              type: 'deepgram',
+              model: sttModel,
+              language: language === 'ar' ? 'ar' : 'en',
+            },
+          },
+          think: {
+            provider: { type: 'open_ai', model: 'gpt-4o-mini' },
+            prompt: systemPrompt,
+            functions: functions || DEEPGRAM_FUNCTIONS,
+          },
+          speak: {
+            provider: {
+              type: 'deepgram',
+              model: ttsModel || process.env.NEXT_PUBLIC_DEEPGRAM_TTS_MODEL || 'aura-2-thalia-en',
+            },
+          },
+          greeting: greeting || 'Hello! How can I help you today?',
+        };
 
-        const speakConfig = elevenLabsApiKey
-          ? [
-              {
-                provider: {
-                  type: 'eleven_labs' as const,
-                  model_id: elevenLabsModel,
-                  // language_code is optional — ElevenLabs auto-detects from text
-                  // Explicit code improves quality for known languages
-                  language_code: language === 'ar' ? 'ar' : 'en',
-                },
-                endpoint: {
-                  url: `wss://api.elevenlabs.io/v1/text-to-speech/${elevenLabsVoiceId}/multi-stream-input`,
-                  headers: {
-                    'xi-api-key': elevenLabsApiKey,
-                  },
-                },
-              },
-              {
-                provider: {
-                  type: 'deepgram' as const,
-                  model: fallbackTtsModel,
-                },
-              },
-            ]
-          : { provider: { type: 'deepgram' as const, model: fallbackTtsModel } };
-
-        connection.sendSettings({
+        wsSend(JSON.stringify({
           type: 'Settings',
           audio: {
             input: { encoding: 'linear16', sample_rate: 16000 },
             output: { encoding: 'linear16', sample_rate: 24000, container: 'none' },
           },
-          agent: {
-            listen: {
-              provider: {
-                type: 'deepgram',
-                model: sttModel,
-                language: language === 'ar' ? 'ar' : 'en',
-              } as any,
-            },
-            think: {
-              provider: { type: 'open_ai', model: 'gpt-4o-mini' },
-              prompt: systemPrompt,
-              functions: DEEPGRAM_FUNCTIONS,
-            },
-            speak: speakConfig,
-            greeting: greeting || 'Hello! How can I help you today?',
-          },
-        });
+          agent: agentConfig,
+        }));
 
         // Start KeepAlive to prevent server-side timeout
         if (keepAliveRef.current) clearInterval(keepAliveRef.current);
         keepAliveRef.current = setInterval(() => {
           if (socketOpenRef.current) {
-            try {
-              connection.sendKeepAlive({ type: 'KeepAlive' });
-            } catch {
-              socketOpenRef.current = false;
-            }
+            wsSend(JSON.stringify({ type: 'KeepAlive' }));
           }
         }, 5000);
         break;
@@ -362,15 +309,8 @@ export function useRealtimeVoice({ businessId, agentId, onConversationEnd }: Use
         // Flush any queued mic frames now that settings are confirmed
         const queued = audioQueueRef.current;
         audioQueueRef.current = [];
-        if (socketOpenRef.current) {
-          for (const buf of queued) {
-            try {
-              connection.sendMedia(buf);
-            } catch {
-              socketOpenRef.current = false;
-              break;
-            }
-          }
+        for (const buf of queued) {
+          wsSend(buf);
         }
         setConnectionState({ status: 'listening' });
         break;
@@ -378,18 +318,17 @@ export function useRealtimeVoice({ businessId, agentId, onConversationEnd }: Use
 
       case 'Error':
         console.error('[Deepgram] Error:', data);
-        setConnectionState({ status: 'error', error: (data as { message?: string })?.message || 'Unknown error' });
+        setConnectionState({ status: 'error', error: (data.message as string) || 'Unknown error' });
         break;
     }
-  }, [businessId, setConnectionState, addTranscriptEntry, saveMessage]);
+  }, [businessId, setConnectionState, addTranscriptEntry, saveMessage, wsSend]);
 
-  // ── Cleanup (memoized so disconnect + useEffect hold a stable ref) ───────
+  // ── Cleanup ─────────────────────────────────────────────────────────────
   const cleanup = useCallback(() => {
     socketOpenRef.current = false;
     settingsAppliedRef.current = false;
     audioQueueRef.current = [];
 
-    // Stop KeepAlive interval
     if (keepAliveRef.current) {
       clearInterval(keepAliveRef.current);
       keepAliveRef.current = null;
@@ -415,8 +354,10 @@ export function useRealtimeVoice({ businessId, agentId, onConversationEnd }: Use
     }
     playbackContextRef.current = null;
 
-    connectionRef.current?.close();
-    connectionRef.current = null;
+    if (wsRef.current) {
+      try { wsRef.current.close(); } catch {}
+      wsRef.current = null;
+    }
 
     startTimeRef.current = null;
     conversationIdRef.current = null;
@@ -438,7 +379,7 @@ export function useRealtimeVoice({ businessId, agentId, onConversationEnd }: Use
       });
       if (!res.ok) throw new Error('Failed to create session');
 
-      const { conversationId: convId, greeting, systemPrompt, ttsModel, language } = await res.json();
+      const { conversationId: convId, greeting, systemPrompt, ttsModel, language, functions } = await res.json();
       conversationIdRef.current = convId;
       setConversationId(convId);
       startTimeRef.current = Date.now();
@@ -448,63 +389,68 @@ export function useRealtimeVoice({ businessId, agentId, onConversationEnd }: Use
       if (!keyRes.ok) throw new Error('Failed to get Deepgram token');
       const apiKey = await keyRes.text();
 
-      // Phase 3: SDK client and WebSocket connection
-      // Store session config for Welcome handler to use when sending settings
-      sessionConfigRef.current = { greeting, systemPrompt, ttsModel, language: language || 'en' };
+      // Store session config for Welcome handler
+      sessionConfigRef.current = { greeting, systemPrompt, ttsModel, language: language || 'en', functions };
 
-      // Regional endpoint configuration for lower latency (EU for MENA region)
-      // SDK constructs URL as: baseUrl + "/v1/agent/converse"
+      // Phase 3: Raw WebSocket with token subprotocol (matches working widget)
       const region = process.env.NEXT_PUBLIC_DEEPGRAM_REGION || 'us';
-      const clientOptions: { apiKey: string; baseUrl?: string } = { apiKey };
-      
-      // Override base URL for regional endpoints
-      // US: wss://agent.deepgram.com/v1/agent/converse (default)
-      // EU: wss://api.eu.deepgram.com/v1/agent/converse
-      // AU: wss://api.au.deepgram.com/v1/agent/converse
-      if (region === 'eu') {
-        clientOptions.baseUrl = 'wss://api.eu.deepgram.com';
-      } else if (region === 'au') {
-        clientOptions.baseUrl = 'wss://api.au.deepgram.com';
-      }
-      
-      const client = new DeepgramClient(clientOptions);
-      const connection = await client.agent.v1.connect({ Authorization: `Token ${apiKey}` });
-      connectionRef.current = connection;
+      const host = region === 'eu' ? 'api.eu.deepgram.com'
+                 : region === 'au' ? 'api.au.deepgram.com'
+                 : 'agent.deepgram.com';
+      const wsUrl = `wss://${host}/v1/agent/converse`;
 
-      // Phase 4: wire up SDK events BEFORE calling connect()
-      connection.on('open', () => {
-        // Mark socket open and flush any queued mic frames
+      const ws = new WebSocket(wsUrl, ['token', apiKey.trim()]);
+      ws.binaryType = 'arraybuffer';
+      wsRef.current = ws;
+
+      ws.onopen = () => {
         socketOpenRef.current = true;
+        // Flush any queued mic frames
         const queued = audioQueueRef.current;
         audioQueueRef.current = [];
         for (const buf of queued) {
-          connection.sendMedia(buf);
+          wsSend(buf);
         }
-
         setConnectionState({ status: 'listening' });
-      });
+      };
 
-      // Single message handler — dispatch by type
-      connection.on('message', (msg) => {
-        handleMessage(connection, convId, msg);
-      });
+      ws.onmessage = (e: MessageEvent) => {
+        // Binary = audio playback
+        if (e.data instanceof ArrayBuffer) {
+          const header = new Uint8Array(e.data, 0, 4);
+          const isWav = header[0] === 0x52 && header[1] === 0x49 && header[2] === 0x46 && header[3] === 0x46;
+          const pcm = isWav ? e.data.slice(44) : e.data;
+          playbackNodeRef.current?.port.postMessage(pcm, [pcm]);
+          return;
+        }
+        if (e.data instanceof Blob) {
+          e.data.arrayBuffer().then((ab) => {
+            const header = new Uint8Array(ab, 0, 4);
+            const isWav = header[0] === 0x52 && header[1] === 0x49 && header[2] === 0x46 && header[3] === 0x46;
+            const pcm = isWav ? ab.slice(44) : ab;
+            playbackNodeRef.current?.port.postMessage(pcm, [pcm]);
+          });
+          return;
+        }
+        // String = JSON event
+        try {
+          const data = JSON.parse(e.data) as DgEvent;
+          handleDgEvent(convId, data);
+        } catch {}
+      };
 
-      connection.on('error', (err: Error) => {
-        console.error('[Deepgram SDK] Error:', err);
-        setConnectionState({ status: 'error', error: err.message });
-      });
+      ws.onerror = (err) => {
+        console.error('[Deepgram WS] Error:', err);
+        setConnectionState({ status: 'error', error: 'WebSocket error' });
+      };
 
-      connection.on('close', () => {
+      ws.onclose = () => {
         socketOpenRef.current = false;
         audioQueueRef.current = [];
         setConnectionState({ status: 'idle' });
-      });
+      };
 
-      // Phase 4b: Actually open the WebSocket (socket starts in "closed" state)
-      connection.connect();
-      await connection.waitForOpen();
-
-      // Phase 5: mic capture → AudioWorklet → SDK send
+      // Phase 4: mic capture → AudioWorklet → WS send
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           channelCount: 1,
@@ -515,7 +461,6 @@ export function useRealtimeVoice({ businessId, agentId, onConversationEnd }: Use
       });
       mediaStreamRef.current = stream;
 
-      // Separate AudioContexts: 16 kHz for mic, 24 kHz for playback
       const micContext = new AudioContext({ sampleRate: 16000 });
       micContextRef.current = micContext;
 
@@ -524,16 +469,10 @@ export function useRealtimeVoice({ businessId, agentId, onConversationEnd }: Use
 
       await setupPlaybackWorklet(playbackContext);
       await setupMicWorklet(micContext, stream, (buffer) => {
-        if (!socketOpenRef.current) return; // Guard: socket closed
+        if (!socketOpenRef.current) return;
         if (settingsAppliedRef.current) {
-          try {
-            connection.sendMedia(buffer);
-          } catch {
-            // Socket may have closed between check and send — safe to ignore
-            socketOpenRef.current = false;
-          }
+          wsSend(buffer);
         } else {
-          // Queue frames until SettingsApplied (prevents "binary before settings" error)
           audioQueueRef.current.push(buffer);
         }
       });
@@ -546,7 +485,7 @@ export function useRealtimeVoice({ businessId, agentId, onConversationEnd }: Use
       });
       cleanup();
     }
-  }, [businessId, agentId, connectionState.status, setConnectionState, clearTranscript, setConversationId, setupMicWorklet, setupPlaybackWorklet, saveMessage, handleMessage, cleanup]);
+  }, [businessId, agentId, connectionState.status, setConnectionState, clearTranscript, setConversationId, setupMicWorklet, setupPlaybackWorklet, handleDgEvent, wsSend, cleanup]);
 
   // ── Disconnect ────────────────────────────────────────────────────────────
   const disconnect = useCallback(async () => {

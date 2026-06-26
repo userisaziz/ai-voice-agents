@@ -22,7 +22,21 @@ export async function GET(_req: NextRequest) {
   var muted = false;
   var waveInterval = null;
   var pulseAnimFrame = null;
-  var APP_URL = '${appUrl}';
+  // Auto-detect base URL from this script tag's src attribute
+  var scripts = document.getElementsByTagName('script');
+  var APP_URL = '';
+  for (var i = 0; i < scripts.length; i++) {
+    var src = scripts[i].src || '';
+    var idx = src.indexOf('/widget.js');
+    if (idx !== -1) {
+      APP_URL = src.substring(0, idx);
+      break;
+    }
+  }
+  if (!APP_URL) {
+    console.error('[VoiceDesk] Could not detect API base URL from script src. Ensure the script tag src contains /widget.js');
+    APP_URL = '${appUrl}';
+  }
   var micContext = null;
   var playbackContext = null;
   var playbackNode = null;
@@ -533,10 +547,9 @@ export async function GET(_req: NextRequest) {
       if (sessionData.error) throw new Error(sessionData.error);
       conversationId = sessionData.conversationId;
 
-      /* Phase 2: get Deepgram API key */
-      var keyRes = await fetch(APP_URL + '/api/deepgram-token');
-      if (!keyRes.ok) throw new Error('Failed to get API key');
-      var apiKey = await keyRes.text();
+      /* Phase 2: get Deepgram API key from session config */
+      var apiKey = sessionData.apiKey;
+      if (!apiKey) throw new Error('Deepgram API key not available');
 
       /* Phase 3: open WebSocket to Deepgram Voice Agent
        * Connect with API key via Authorization header (subprotocol).
@@ -559,8 +572,8 @@ export async function GET(_req: NextRequest) {
         listen: { 
           provider: {
             type: 'deepgram',
+            version: 'v2',
             model: sttModel,
-            language: sessionData.language === 'ar' ? 'ar' : 'en',
           }
         },
         think: {
@@ -768,8 +781,8 @@ export async function GET(_req: NextRequest) {
         break;
 
       case 'Error':
-        console.error('[VoiceDesk] Agent error:', ev.message || ev);
-        setStatusText('Error: ' + (ev.message || 'Agent error'));
+        console.error('[VoiceDesk] Agent error:', JSON.stringify(ev, null, 2));
+        setStatusText('Error: ' + (ev.message || ev.description || 'Agent error'));
         break;
     }
   }

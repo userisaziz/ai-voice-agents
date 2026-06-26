@@ -6,6 +6,7 @@ import { motion } from 'framer-motion';
 import {
   LayoutDashboard, Bot, Calendar, MessageSquare, Wrench,
   HelpCircle, Code2, BarChart3, Settings, Mic, LogOut, Phone,
+  BookOpen,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { createClient } from '@/lib/supabase/client';
@@ -25,6 +26,7 @@ const navGroups = [
     label: 'Configure',
     items: [
       { href: '/dashboard/agents',   label: 'AI Agents', icon: Bot },
+      { href: '/dashboard/knowledge', label: 'Knowledge', icon: BookOpen },
       { href: '/dashboard/telephony', label: 'Telephony', icon: Phone },
       { href: '/dashboard/services', label: 'Services',  icon: Wrench },
       { href: '/dashboard/faqs',     label: 'FAQs',      icon: HelpCircle },

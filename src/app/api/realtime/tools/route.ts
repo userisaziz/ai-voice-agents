@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createAdminSupabase } from '@/lib/supabase/admin';
 import { getAvailableSlots } from '@/services/appointments';
 import { searchProducts, getCategories, getTopSellers } from '@/services/marsa-tijarah';
+import { hybridSearch, formatSearchContext } from '@/lib/rag/search';
 import type { Business } from '@/types';
 
 export async function OPTIONS() {
@@ -310,6 +311,28 @@ export async function POST(req: NextRequest) {
             ? 'No premium sellers available at the moment.'
             : `Found ${sellerResult.sellers.length} top-rated premium seller(s).`,
         };
+        break;
+      }
+
+      case 'searchKnowledge': {
+        const args = toolArgs as { query: string };
+        if (!args.query) {
+          result = { error: 'Search query is required' };
+          break;
+        }
+
+        try {
+          const searchResults = await hybridSearch(args.query, businessId, 5);
+          const context = formatSearchContext(searchResults);
+          result = {
+            query: args.query,
+            found: searchResults.length,
+            context: context || 'No relevant knowledge base entries found for this query.',
+          };
+        } catch (err) {
+          console.error('[Tools] Knowledge search error:', err);
+          result = { error: 'Knowledge base search failed', details: 'Try again later' };
+        }
         break;
       }
 

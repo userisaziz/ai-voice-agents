@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminSupabase } from '@/lib/supabase/admin';
 import { searchProducts, getCategories, getTopSellers } from '@/services/marsa-tijarah';
+import { hybridSearch, formatSearchContext } from '@/lib/rag/search';
 
 export async function OPTIONS() {
   return new NextResponse(null, {
@@ -160,7 +161,17 @@ export async function POST(req: NextRequest) {
 
     // Build system prompt
     const basePrompt = agent?.system_prompt || `You are a helpful AI assistant for ${business.name}. Answer questions clearly and concisely. Be friendly and professional.`;
-    const contextPrompt = `${basePrompt}\n\nBusiness: ${business.name}${business.city ? ', ' + business.city : ''}${business.state ? ', ' + business.state : ''}\nYou are chatting via the website chat widget. Keep responses concise (2-3 sentences max). Use a conversational tone.\n\nYou have access to marketplace tools: use searchProducts to find products, getCategories to browse categories, and getTopSellers to find top sellers. When presenting product results, format them nicely with name, price, and supplier info.`;
+
+    // RAG: Retrieve relevant knowledge chunks for the user's query
+    let ragContext = '';
+    try {
+      const ragResults = await hybridSearch(message, businessId, 5);
+      ragContext = formatSearchContext(ragResults);
+    } catch (ragErr) {
+      console.warn('[Chat API] RAG search failed (non-fatal):', ragErr);
+    }
+
+    const contextPrompt = `${basePrompt}\n\nBusiness: ${business.name}${business.city ? ', ' + business.city : ''}${business.state ? ', ' + business.state : ''}\nYou are chatting via the website chat widget. Keep responses concise (2-3 sentences max). Use a conversational tone.\n\nYou have access to marketplace tools: use searchProducts to find products, getCategories to browse categories, and getTopSellers to find top sellers. When presenting product results, format them nicely with name, price, and supplier info.${ragContext ? '\n\n' + ragContext : ''}`;
 
     // Build message history for DeepSeek
     const messages: ChatMessage[] = [

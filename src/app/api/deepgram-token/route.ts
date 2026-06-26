@@ -1,15 +1,22 @@
 import { NextResponse } from 'next/server';
+import { createClient } from '@/lib/supabase/server';
 
 /**
- * Returns the Deepgram API key for the AgentSession token factory.
+ * Returns the Deepgram API key for authenticated clients.
  * 
  * Security:
- * - This is a same-origin endpoint (browser can only call our own server)
- * - The actual API key is never exposed to the browser — it's only returned
- *   as a text response that the token factory consumes server-to-server
- * - No auth required since the key is transient and only used by our own client code
+ * - Requires a valid Supabase session (authenticated user)
+ * - Returns the key as text/plain with strict cache-control headers
+ * - The API key is never exposed to unauthenticated requests
  */
 export async function GET() {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+
+  if (!user) {
+    return new NextResponse('Unauthorized', { status: 401 });
+  }
+
   const apiKey = process.env.DEEPGRAM_API_KEY;
 
   if (!apiKey) {
