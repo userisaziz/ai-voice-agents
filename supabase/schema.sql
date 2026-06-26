@@ -4,6 +4,9 @@
 -- Enable UUID extension
 create extension if not exists "uuid-ossp";
 
+-- Enable pgvector for RAG embeddings
+create extension if not exists vector;
+
 -- =============================================
 -- BUSINESSES TABLE
 -- =============================================
@@ -250,6 +253,7 @@ create trigger update_conversations_updated_at before update on conversations fo
 create trigger update_faqs_updated_at before update on faqs for each row execute function update_updated_at_column();
 create trigger update_leads_updated_at before update on leads for each row execute function update_updated_at_column();
 create trigger update_embedded_widgets_updated_at before update on embedded_widgets for each row execute function update_updated_at_column();
+create trigger update_knowledge_sources_updated_at before update on knowledge_sources for each row execute function update_updated_at_column();
 
 -- Telephony triggers
 create trigger update_telephony_providers_updated_at before update on telephony_providers for each row execute function update_updated_at_column();
@@ -456,6 +460,26 @@ create policy "Service role can insert call logs"
 create policy "Service role can update call logs"
   on call_logs for update using (true) with check (true);
 
+-- Knowledge Sources RLS
+alter table knowledge_sources enable row level security;
+
+create policy "Business owners can manage knowledge sources"
+  on knowledge_sources for all
+  using (is_business_owner(business_id))
+  with check (is_business_owner(business_id));
+
+create policy "Service role can manage knowledge sources"
+  on knowledge_sources for all using (true) with check (true);
+
+-- Knowledge Chunks RLS
+alter table knowledge_chunks enable row level security;
+
+create policy "Business owners can view knowledge chunks"
+  on knowledge_chunks for select using (is_business_owner(business_id));
+
+create policy "Service role can manage knowledge chunks"
+  on knowledge_chunks for all using (true) with check (true);
+
 -- =============================================
 -- TELEPHONY PROVIDERS TABLE
 -- =============================================
@@ -597,6 +621,139 @@ create index idx_call_logs_campaign_id on call_logs(campaign_id);
 create index idx_call_logs_direction on call_logs(direction);
 create index idx_call_logs_status on call_logs(status);
 create index idx_call_logs_created_at on call_logs(created_at);
+
+-- =============================================
+-- KNOWLEDGE SOURCES TABLE (RAG)
+-- =============================================
+create table if not exists knowledge_sources (
+  id uuid primary key default uuid_generate_v4(),
+  business_id uuid not null references businesses(id) on delete cascade,
+  source_type text not null check (source_type in ('url', 'file', 'manual')),
+  source_url text,
+  file_name text,
+  title text not null,
+  status text not null default 'pending' check (status in ('pending', 'processing', 'ready', 'failed')),
+  error_message text,
+  chunk_count integer not null default 0,
+  metadata jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index idx_knowledge_sources_business_id on knowledge_sources(business_id);
+create index idx_knowledge_sources_status on knowledge_sources(status);
+
+-- =============================================
+-- KNOWLEDGE CHUNKS TABLE (RAG)
+-- =============================================
+create table if not exists knowledge_chunks (
+  id uuid primary key default uuid_generate_v4(),
+  source_id uuid not null references knowledge_sources(id) on delete cascade,
+  business_id uuid not null references businesses(id) on delete cascade,
+  content text not null,
+  content_tsv tsvector,
+  embedding vector(384),
+  chunk_index integer not null default 0,
+  metadata jsonb,
+  created_at timestamptz not null default now()
+);
+
+create index idx_knowledge_chunks_source_id on knowledge_chunks(source_id);
+create index idx_knowledge_chunks_business_id on knowledge_chunks(business_id);
+-- HNSW index for fast vector similarity search
+create index idx_knowledge_chunks_embedding on knowledge_chunks using hnsw (embedding vector_cosine_ops);
+-- GIN index for full-text search
+create index idx_knowledge_chunks_content_tsv on knowledge_chunks using gin (content_tsv);
+
+-- Auto-update tsvector when content changes
+create or replace function update_content_tsv() returns trigger as $$
+begin
+  new.content_tsv := to_tsvector('english', coalesce(new.content, ''));
+  return new;
+end;
+$$ language plpgsql;
+
+create trigger trg_update_content_tsv before insert or update of content on knowledge_chunks
+  for each row execute function update_content_tsv();
+
+-- Hybrid search RPC function (vector + FTS with RRF fusion)
+create or replace function search_knowledge(
+  query_embedding vector(384),
+  query_text text,
+  p_business_id uuid,
+  match_count integer default 5,
+  match_threshold float default 0.3
+) returns table (
+  id uuid,
+  content text,
+  source_id uuid,
+  source_title text,
+  source_type text,
+  similarity float,
+  fts_rank float,
+  score float,
+  metadata jsonb
+) as $$
+with vector_results as (
+  select
+    kc.id,
+    kc.content,
+    kc.source_id,
+    kc.metadata,
+    1 - (kc.embedding <=> query_embedding) as similarity,
+    row_number() over (order by 1 - (kc.embedding <=> query_embedding) desc) as vec_rank
+  from knowledge_chunks kc
+  where kc.business_id = p_business_id
+    and kc.embedding is not null
+    and 1 - (kc.embedding <=> query_embedding) > match_threshold
+  order by similarity desc
+  limit match_count * 2
+),
+fts_results as (
+  select
+    kc.id,
+    kc.content,
+    kc.source_id,
+    kc.metadata,
+    ts_rank(kc.content_tsv, plainto_tsquery('english', query_text)) as fts_rank,
+    row_number() over (order by ts_rank(kc.content_tsv, plainto_tsquery('english', query_text)) desc) as fts_row
+  from knowledge_chunks kc
+  where kc.business_id = p_business_id
+    and kc.content_tsv @@ plainto_tsquery('english', query_text)
+  order by fts_rank desc
+  limit match_count * 2
+),
+combined as (
+  select
+    coalesce(v.id, f.id) as chunk_id,
+    coalesce(v.content, f.content) as content,
+    coalesce(v.source_id, f.source_id) as source_id,
+    coalesce(v.metadata, f.metadata) as metadata,
+    coalesce(v.similarity, 0) as similarity,
+    coalesce(f.fts_rank, 0) as fts_rank,
+    -- Reciprocal Rank Fusion: score = sum(1 / (k + rank))
+    (
+      coalesce(1.0 / (60 + v.vec_rank), 0) +
+      coalesce(1.0 / (60 + f.fts_row), 0)
+    ) as score
+  from vector_results v
+  full outer join fts_results f on v.id = f.id
+)
+select
+  c.chunk_id as id,
+  c.content,
+  c.source_id,
+  ks.title as source_title,
+  ks.source_type,
+  c.similarity,
+  c.fts_rank,
+  c.score,
+  c.metadata
+from combined c
+join knowledge_sources ks on ks.id = c.source_id
+order by c.score desc
+limit match_count;
+$$ language sql security definer;
 
 -- =============================================
 -- SEED DEFAULT BUSINESS HOURS (called via function)

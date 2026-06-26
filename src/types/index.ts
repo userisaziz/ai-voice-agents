@@ -388,6 +388,38 @@ export interface CallResult {
   error?: string;
 }
 
+// =============================================
+// KNOWLEDGE BASE TYPES (RAG)
+// =============================================
+
+export type KnowledgeSourceType = 'url' | 'file' | 'manual';
+export type KnowledgeSourceStatus = 'pending' | 'processing' | 'ready' | 'failed';
+
+export interface KnowledgeSource {
+  id: string;
+  business_id: string;
+  source_type: KnowledgeSourceType;
+  source_url: string | null;
+  file_name: string | null;
+  title: string;
+  status: KnowledgeSourceStatus;
+  error_message: string | null;
+  chunk_count: number;
+  metadata: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface KnowledgeChunk {
+  id: string;
+  source_id: string;
+  business_id: string;
+  content: string;
+  chunk_index: number;
+  metadata: Record<string, unknown> | null;
+  created_at: string;
+}
+
 export interface ProviderCallStatus {
   callId: string;
   status: CallStatus;

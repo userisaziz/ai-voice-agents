@@ -128,6 +128,17 @@ export const DEEPGRAM_FUNCTIONS = [
       required: ['name', 'phone'],
     },
   },
+  {
+    name: 'searchKnowledge',
+    description: 'Search the business knowledge base for information about products, services, policies, or any other business-related questions. Use this when the customer asks about something not covered by other tools.',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'The search query describing what information is needed' },
+      },
+      required: ['query'],
+    },
+  },
 ];
 
 /**
@@ -145,7 +156,8 @@ export function buildSystemPrompt(
   agentSystemPrompt: string | null,
   faqs: Array<{ question: string; answer: string }>,
   language = 'en',
-  greetingMessage?: string | null
+  greetingMessage?: string | null,
+  ragContext?: string
 ): string {
   // Only add language/greeting instructions if the agent's own prompt doesn't
   // already cover them — avoids redundant directives that cause greeting loops.
@@ -214,6 +226,7 @@ BUSINESS HOURS:
 ${hoursText}
 
 ${faqsText ? `FREQUENTLY ASKED QUESTIONS:\n${faqsText}` : ''}
+${ragContext ? ragContext : ''}
 
 IMPORTANT RULES:
 ${languageRules}
