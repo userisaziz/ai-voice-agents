@@ -267,7 +267,6 @@ export function useRealtimeVoice({ businessId, agentId, onConversationEnd }: Use
             provider: {
               type: 'deepgram',
               model: sttModel,
-              language: language === 'ar' ? 'ar' : 'en',
             },
           },
           think: {
