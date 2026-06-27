@@ -576,7 +576,7 @@ export async function GET(_req: NextRequest) {
           }
         },
         think: {
-          provider: { type: 'open_ai', model: 'gpt-4o-mini' },
+          provider: sessionData.thinkProvider || { type: 'open_ai', model: 'gpt-4o-mini' },
           prompt: sessionData.systemPrompt,
           functions: sessionData.functions || sessionData.tools || [],
         },

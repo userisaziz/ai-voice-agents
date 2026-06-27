@@ -257,67 +257,36 @@ export function useRealtimeVoice({ businessId, agentId, onConversationEnd }: Use
       }
 
       case 'Welcome': {
-        console.log('[Deepgram] Welcome received, sending settings');
-        const { greeting, systemPrompt, ttsModel, language, functions } = sessionConfigRef.current;
-        const baseSttModel = process.env.NEXT_PUBLIC_DEEPGRAM_STT_MODEL || 'flux-general-en';
-        const sttModel = language === 'ar' ? 'flux-general-multi' : baseSttModel;
-
-        const agentConfig = {
-          listen: {
-            provider: {
-              type: 'deepgram',
-              model: sttModel,
-            },
-          },
-          think: {
-            provider: { type: 'open_ai', model: 'gpt-4o-mini' },
-            prompt: systemPrompt,
-            functions: functions || DEEPGRAM_FUNCTIONS,
-          },
-          speak: {
-            provider: {
-              type: 'deepgram',
-              model: ttsModel || process.env.NEXT_PUBLIC_DEEPGRAM_TTS_MODEL || 'aura-2-thalia-en',
-            },
-          },
-          greeting: greeting || 'Hello! How can I help you today?',
-        };
-
-        wsSend(JSON.stringify({
-          type: 'Settings',
-          audio: {
-            input: { encoding: 'linear16', sample_rate: 16000 },
-            output: { encoding: 'linear16', sample_rate: 24000, container: 'none' },
-          },
-          agent: agentConfig,
-        }));
-
-        // Start KeepAlive to prevent server-side timeout
-        if (keepAliveRef.current) clearInterval(keepAliveRef.current);
-        keepAliveRef.current = setInterval(() => {
-          if (socketOpenRef.current) {
-            wsSend(JSON.stringify({ type: 'KeepAlive' }));
-          }
-        }, 5000);
+        console.log('[Deepgram] Welcome received (settings already sent on open)');
         break;
       }
 
       case 'SettingsApplied': {
-        console.log('[Deepgram] Settings applied, ready for audio');
+        console.log('[Deepgram] Settings applied');
         settingsAppliedRef.current = true;
-        // Flush any queued mic frames now that settings are confirmed
-        const queued = audioQueueRef.current;
-        audioQueueRef.current = [];
-        for (const buf of queued) {
-          wsSend(buf);
-        }
         setConnectionState({ status: 'listening' });
         break;
       }
 
       case 'Error':
         console.error('[Deepgram] Error:', data);
-        setConnectionState({ status: 'error', error: (data.message as string) || 'Unknown error' });
+        console.error('[Deepgram] Error details:', {
+          type: data.type,
+          message: data.message,
+          code: data.code,
+          description: data.description,
+        });
+        
+        // Enhanced error message for LLM failures
+        let errorMsg = (data.message as string) || 'Unknown error';
+        const description = data.description as string | undefined;
+        if (description?.includes('LLM') || description?.includes('think')) {
+          errorMsg = `LLM Error: ${description}. Check DEEPSEEK_API_KEY and endpoint configuration.`;
+        } else if (description?.includes('timeout') || data.code === 'CLIENT_MESSAGE_TIMEOUT') {
+          errorMsg = 'Connection timeout - audio not reaching Deepgram. Check microphone and network.';
+        }
+        
+        setConnectionState({ status: 'error', error: errorMsg });
         break;
     }
   }, [businessId, setConnectionState, addTranscriptEntry, saveMessage, wsSend]);
@@ -391,6 +360,17 @@ export function useRealtimeVoice({ businessId, agentId, onConversationEnd }: Use
       // Store session config for Welcome handler
       sessionConfigRef.current = { greeting, systemPrompt, ttsModel, language: language || 'en', functions };
 
+      // Determine STT model for logging
+      const sttModelLog = process.env.NEXT_PUBLIC_DEEPGRAM_STT_MODEL || 'flux-general-multi';
+
+      console.log('[Voice] Session config:', {
+        provider: process.env.NEXT_PUBLIC_DEEPGRAM_LLM_PROVIDER_TYPE,
+        model: process.env.NEXT_PUBLIC_DEEPGRAM_LLM_MODEL,
+        endpoint: process.env.NEXT_PUBLIC_DEEPGRAM_LLM_ENDPOINT_URL,
+        stt: sttModelLog,
+        language: language || 'en',
+      });
+
       // Phase 3: Raw WebSocket with token subprotocol (matches working widget)
       const region = process.env.NEXT_PUBLIC_DEEPGRAM_REGION || 'us';
       const host = region === 'eu' ? 'api.eu.deepgram.com'
@@ -404,12 +384,85 @@ export function useRealtimeVoice({ businessId, agentId, onConversationEnd }: Use
 
       ws.onopen = () => {
         socketOpenRef.current = true;
-        // Flush any queued mic frames
+        console.log('[Deepgram WS] Open, sending Settings immediately');
+        
+        // Send Settings FIRST, before any audio
+        const { greeting, systemPrompt, ttsModel, language, functions } = sessionConfigRef.current;
+        
+        // Use flux-general-multi for bilingual support (Arabic + English)
+        const sttModel = process.env.NEXT_PUBLIC_DEEPGRAM_STT_MODEL || 'flux-general-multi';
+        
+        // LLM provider configuration
+        const llmProviderType = process.env.NEXT_PUBLIC_DEEPGRAM_LLM_PROVIDER_TYPE || 'open_ai';
+        const llmModel = process.env.NEXT_PUBLIC_DEEPGRAM_LLM_MODEL || 'gpt-4o-mini';
+        
+        // Build think provider config based on provider type
+        // DeepSeek uses OpenAI-compatible API, so provider type is 'open_ai'
+        const thinkProvider: Record<string, unknown> = {
+          type: llmProviderType === 'deepseek' ? 'open_ai' : llmProviderType,
+          model: llmModel,
+        };
+        
+        // Build think config - endpoint is REQUIRED for DeepSeek/custom, must be an object
+        const thinkConfig: Record<string, unknown> = {
+          provider: thinkProvider,
+          prompt: systemPrompt,
+          functions: functions || DEEPGRAM_FUNCTIONS,
+        };
+        
+        // For DeepSeek and custom providers, add explicit endpoint configuration
+        // Endpoint must be an object with 'url' and 'headers' fields per Deepgram API spec
+        if (llmProviderType === 'deepseek' || llmProviderType === 'custom') {
+          const endpointUrl = process.env.NEXT_PUBLIC_DEEPGRAM_LLM_ENDPOINT_URL || 'https://api.deepseek.com/v1';
+          const apiKey = process.env.NEXT_PUBLIC_DEEPSEEK_API_KEY || '';
+          
+          thinkConfig.endpoint = {
+            url: endpointUrl,
+            headers: {
+              authorization: `Bearer ${apiKey}`,
+            },
+          };
+        }
+
+        const agentConfig = {
+          listen: {
+            provider: {
+              type: 'deepgram',
+              model: sttModel,
+            },
+          },
+          think: thinkConfig,
+          speak: {
+            provider: {
+              type: 'deepgram',
+              model: ttsModel || process.env.NEXT_PUBLIC_DEEPGRAM_TTS_MODEL || 'aura-2-thalia-en',
+            },
+          },
+          greeting: greeting || 'Hello! How can I help you today?',
+        };
+
+        console.log('[Deepgram] Sending Settings with think config:', {
+          provider: thinkProvider,
+          hasEndpoint: !!thinkConfig.endpoint,
+          endpointUrl: (thinkConfig.endpoint as { url?: string })?.url,
+        });
+
+        wsSend(JSON.stringify({
+          type: 'Settings',
+          audio: {
+            input: { encoding: 'linear16', sample_rate: 16000 },
+            output: { encoding: 'linear16', sample_rate: 24000, container: 'none' },
+          },
+          agent: agentConfig,
+        }));
+
+        // Flush queued mic frames immediately
         const queued = audioQueueRef.current;
         audioQueueRef.current = [];
         for (const buf of queued) {
           wsSend(buf);
         }
+        
         setConnectionState({ status: 'listening' });
       };
 
@@ -469,11 +522,8 @@ export function useRealtimeVoice({ businessId, agentId, onConversationEnd }: Use
       await setupPlaybackWorklet(playbackContext);
       await setupMicWorklet(micContext, stream, (buffer) => {
         if (!socketOpenRef.current) return;
-        if (settingsAppliedRef.current) {
-          wsSend(buffer);
-        } else {
-          audioQueueRef.current.push(buffer);
-        }
+        // Always send audio immediately - don't wait for SettingsApplied
+        wsSend(buffer);
       });
 
     } catch (err) {

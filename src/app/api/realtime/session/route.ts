@@ -142,6 +142,22 @@ export async function POST(req: NextRequest) {
         ttsModel = multilingualDefaults[agentLanguage] || 'aura-2-thalia-en';
       }
 
+      // Build think provider config with DeepSeek endpoint
+      const deepseekKey = process.env.DEEPSEEK_API_KEY || process.env.NEXT_PUBLIC_DEEPSEEK_API_KEY || '';
+      const thinkProvider = deepseekKey
+        ? {
+            type: 'open_ai',
+            model: process.env.DEEPGRAM_LLM_MODEL || 'deepseek-chat',
+            endpoint: {
+              url: process.env.DEEPGRAM_LLM_ENDPOINT_URL || 'https://api.deepseek.com/v1',
+              headers: { authorization: `Bearer ${deepseekKey}` },
+            },
+          }
+        : {
+            type: 'open_ai',
+            model: 'gpt-4o-mini',
+          };
+
       return NextResponse.json({
         conversationId: conversation?.id,
         agentName: agentTyped?.name || 'AI Receptionist',
@@ -154,6 +170,7 @@ export async function POST(req: NextRequest) {
         functions: DEEPGRAM_FUNCTIONS, // Deepgram format
         greeting,
         apiKey: process.env.DEEPGRAM_API_KEY,
+        thinkProvider,
         turnDetection: {
           type: 'server_vad',
           threshold: sensitivity === 'low' ? 0.9 : sensitivity === 'high' ? 0.5 : 0.7,

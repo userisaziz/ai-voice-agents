@@ -4,6 +4,8 @@
  * Uses HuggingFace Inference API with sentence-transformers/all-MiniLM-L6-v2
  * Produces 384-dimensional embeddings for vector similarity search.
  * Free tier available (rate-limited); add HF_API_TOKEN for higher limits.
+ * 
+ * Fallback: Returns zero embeddings if HuggingFace is unavailable (RAG disabled gracefully)
  */
 
 const MODEL = 'sentence-transformers/all-MiniLM-L6-v2';
@@ -14,6 +16,7 @@ export { EMBEDDING_DIM };
 
 /**
  * Generate a single embedding vector for the given text.
+ * Returns zero vector if HuggingFace is unavailable (graceful degradation).
  */
 export async function embedText(text: string): Promise<number[]> {
   const headers: Record<string, string> = {
@@ -25,45 +28,56 @@ export async function embedText(text: string): Promise<number[]> {
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  const response = await fetch(HF_API_URL, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({
-      inputs: text,
-      options: { wait_for_model: true },
-    }),
-  });
+  try {
+    const response = await fetch(HF_API_URL, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        inputs: text,
+        options: { wait_for_model: true },
+      }),
+      signal: AbortSignal.timeout(10000), // 10s timeout
+    });
 
-  if (!response.ok) {
-    const errorBody = await response.text();
-    // If HuggingFace is loading the model, retry once after a short delay
-    if (response.status === 503) {
-      const retryAfter = parseInt(response.headers.get('retry-after') || '5', 10);
-      console.warn(`[Embeddings] Model loading, retrying in ${retryAfter}s...`);
-      await new Promise((r) => setTimeout(r, retryAfter * 1000));
-      const retry = await fetch(HF_API_URL, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          inputs: text,
-          options: { wait_for_model: true, use_cache: false },
-        }),
-      });
-      if (!retry.ok) {
-        throw new Error(`HuggingFace embedding failed (retry): ${retry.status} ${await retry.text()}`);
+    if (!response.ok) {
+      const errorBody = await response.text();
+      // If HuggingFace is loading the model, retry once after a short delay
+      if (response.status === 503) {
+        const retryAfter = parseInt(response.headers.get('retry-after') || '5', 10);
+        console.warn(`[Embeddings] Model loading, retrying in ${retryAfter}s...`);
+        await new Promise((r) => setTimeout(r, retryAfter * 1000));
+        const retry = await fetch(HF_API_URL, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            inputs: text,
+            options: { wait_for_model: true, use_cache: false },
+          }),
+          signal: AbortSignal.timeout(15000),
+        });
+        if (!retry.ok) {
+          console.error(`[Embeddings] HuggingFace retry failed: ${retry.status}`);
+          return new Array(EMBEDDING_DIM).fill(0); // Graceful fallback
+        }
+        return retry.json();
       }
-      return retry.json();
+      console.error(`[Embeddings] HuggingFace failed: ${response.status}`);
+      return new Array(EMBEDDING_DIM).fill(0); // Graceful fallback
     }
-    throw new Error(`HuggingFace embedding failed: ${response.status} ${errorBody}`);
+
+    const embedding: number[] = await response.json();
+
+    if (!Array.isArray(embedding) || embedding.length !== EMBEDDING_DIM) {
+      console.error(`[Embeddings] Unexpected shape: expected [${EMBEDDING_DIM}]`);
+      return new Array(EMBEDDING_DIM).fill(0); // Graceful fallback
+    }
+
+    return embedding;
+  } catch (err) {
+    // Network error, timeout, or other failure - return zero vector
+    console.warn('[Embeddings] Service unavailable, RAG disabled for this session:', err instanceof Error ? err.message : 'Unknown error');
+    return new Array(EMBEDDING_DIM).fill(0);
   }
-
-  const embedding: number[] = await response.json();
-
-  if (!Array.isArray(embedding) || embedding.length !== EMBEDDING_DIM) {
-    throw new Error(`Unexpected embedding shape: expected [${EMBEDDING_DIM}], got ${JSON.stringify(embedding?.length ?? 'non-array')}`);
-  }
-
-  return embedding;
 }
 
 /**
