@@ -572,7 +572,6 @@ export async function GET(_req: NextRequest) {
         listen: { 
           provider: {
             type: 'deepgram',
-            version: 'v2',
             model: sttModel,
           }
         },
